@@ -1,0 +1,120 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  id-token: write       # Sigstore keyless via GitHub OIDC
+  pull-requests: write
+  packages: write
+
+# TODO(security): every `uses:` MUST be pinned to a full SHA before production rollout.
+
+env:
+  REGISTRY: 537462380503.dkr.ecr.eu-west-1.amazonaws.com
+  IMAGE_NAME: doc-uploader-sandbox/zip-extraction
+  AWS_REGION: eu-west-1
+
+jobs:
+  build-sign-push:
+    name: build + sign + push
+    runs-on: ubuntu-22.04
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    defaults:
+      run:
+        working-directory: services/zip-extraction
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::537462380503:role/zip-extraction-ci-pusher
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build & push multi-arch image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: services/zip-extraction
+          file: services/zip-extraction/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+          provenance: true
+          sbom: true
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: cosign sign (keyless OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+
+      - name: cosign attest SBOM
+        env:
+          COSIGN_EXPERIMENTAL: '1'
+        run: |
+          cosign attest --yes \
+            --predicate sbom.cyclonedx.json \
+            --type cyclonedx \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+
+      - name: Attach SBOM to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: services/zip-extraction/sbom.cyclonedx.json
+
+  bump-sandbox-digest:
+    name: bot PR — bump sandbox digest
+    needs: build-sign-push
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update values-sandbox.yaml
+        env:
+          DIGEST: ${{ needs.build-sign-push.outputs.digest }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Strip leading 'v' from TAG for image.tag (e.g., v0.1.0 → 0.1.0).
+          BARE_TAG="${TAG#v}"
+          sed -i "s|^  digest: \".*\"|  digest: \"${DIGEST}\"|" services/zip-extraction/chart/values-sandbox.yaml
+          # Update the image.tag if it appears in values.yaml; the per-env overlay does not include image.tag by default.
+
+      - name: Create bot PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(release): pin sandbox digest to ${{ github.ref_name }}"
+          title: "chore(release): pin sandbox digest to ${{ github.ref_name }}"
+          body: |
+            Automated digest pin from release ${{ github.ref_name }}.
+
+            Image digest: `${{ needs.build-sign-push.outputs.digest }}`
+
+            Staging / production digests are NOT auto-updated — operators must
+            manually open promotion PRs after verifying sandbox.
+          branch: release/${{ github.ref_name }}-sandbox-pin
+          base: main

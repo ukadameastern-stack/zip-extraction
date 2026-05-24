@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /services/zip-extraction
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      aws-sdk:
+        patterns:
+          - "github.com/aws/aws-sdk-go-v2*"
+
+  - package-ecosystem: gomod
+    directory: /services/zip-extraction/tools
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /services/zip-extraction
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

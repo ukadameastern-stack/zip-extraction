@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/zip-extraction/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    paths:
+      - 'services/zip-extraction/**'
+      - '.github/workflows/ci.yml'
+
+# TODO(security): every `uses:` reference below MUST be pinned to a full SHA
+# (e.g., actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11) before
+# merging to main. Tag references are placeholders for legibility.
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  build-test-vuln:
+    name: lint + test + vuln
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: services/zip-extraction
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+          cache-dependency-path: services/zip-extraction/go.sum
+
+      - name: go mod verify
+        run: go mod verify
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.60.0
+          working-directory: services/zip-extraction
+
+      - name: build
+        run: go build -trimpath ./...
+
+      - name: test (incl. PBT)
+        env:
+          RAPID_SEED: ${{ github.run_id }}
+        run: go test -race -coverpkg=./internal/... -coverprofile=cover.out ./...
+
+      - name: coverage gate (>=80%)
+        run: |
+          go tool cover -func=cover.out | awk '/^total:/ {print $3}' | sed 's/%//' \
+            | awk '{ if ($1 < 80) { print "coverage", $1, "<80%"; exit 1 } }'
+
+      - name: govulncheck
+        run: go run -modfile=tools/go.mod golang.org/x/vuln/cmd/govulncheck ./...
+
+      - name: helm lint
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.15.0
+
+      - name: helm template + lint
+        run: |
+          helm lint chart -f chart/values.yaml -f chart/values-sandbox.yaml
+          helm template zip-extraction chart -f chart/values.yaml -f chart/values-sandbox.yaml > /tmp/render-sandbox.yaml
