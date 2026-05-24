@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.34.0
 	github.com/aws/smithy-go v1.22.0
 	github.com/prometheus/client_golang v1.20.0
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go/modules/localstack v0.33.0
 	go.uber.org/zap v1.27.0
 	gopkg.in/yaml.v3 v3.0.1
