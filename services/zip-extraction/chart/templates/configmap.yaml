@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "zip-extraction.fullname" . }}-config
+  labels: {{- include "zip-extraction.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    bombDefence:
+      maxCompressedSizeBytes:     {{ .Values.bombDefence.maxCompressedSizeBytes }}
+      maxExtractedSizeBytes:      {{ .Values.bombDefence.maxExtractedSizeBytes }}
+      maxCompressionRatio:        {{ .Values.bombDefence.maxCompressionRatio }}
+      maxEntryCount:              {{ .Values.bombDefence.maxEntryCount }}
+      maxDirectoryDepth:          {{ .Values.bombDefence.maxDirectoryDepth }}
+      maxSingleFileSizeBytes:     {{ .Values.bombDefence.maxSingleFileSizeBytes }}
+      maxExtractionDurationSec:   {{ .Values.bombDefence.maxExtractionDurationSec }}
+    streaming:
+      maxInMemoryBufferBytes:     {{ .Values.streaming.maxInMemoryBufferBytes }}
+      multipartThresholdBytes:    {{ .Values.streaming.multipartThresholdBytes }}
+    retry:
+      maxAttempts:                {{ .Values.retry.maxAttempts }}
+      backoffBaseMillis:          {{ .Values.retry.backoffBaseMillis }}
+      backoffFactor:              {{ .Values.retry.backoffFactor }}
+      jitterFraction:             {{ .Values.retry.jitterFraction }}
+    sqs:
+      heartbeatIntervalSec:       {{ .Values.sqs.heartbeatIntervalSec }}
+      maxInFlight:                {{ .Values.sqs.maxInFlight }}
+      gracefulShutdownTimeoutSec: {{ .Values.sqs.gracefulShutdownTimeoutSec }}
+      visibilityTimeoutSec:       {{ .Values.sqs.visibilityTimeoutSec }}

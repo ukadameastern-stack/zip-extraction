@@ -1,0 +1,17 @@
+.git/
+.github/
+aidlc-docs/
+*_test.go
+test/
+README*.md
+Makefile
+.golangci.yml
+.gitignore
+chart/
+deploy/
+docs/
+bin/
+*.pprof
+coverage.out
+cover.out
+sbom.cyclonedx.json

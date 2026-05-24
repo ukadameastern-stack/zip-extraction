@@ -1,0 +1,28 @@
+# Local-development tunable config. Mirrors chart/values.yaml defaults; the
+# Helm chart's templates/configmap.yaml renders the same schema in production.
+# Loaded by internal/config.Load() at CONFIG_PATH=/etc/zip-extraction/config.yaml.
+
+bombDefence:
+  maxCompressedSizeBytes:     524288000    # 500 MB
+  maxExtractedSizeBytes:      2147483648   # 2 GB
+  maxCompressionRatio:        1000
+  maxEntryCount:              10000
+  maxDirectoryDepth:          10
+  maxSingleFileSizeBytes:     262144000    # 250 MB
+  maxExtractionDurationSec:   240
+
+streaming:
+  maxInMemoryBufferBytes:     4194304      # 4 MB
+  multipartThresholdBytes:    5242880      # 5 MB
+
+retry:
+  maxAttempts:                3
+  backoffBaseMillis:          200
+  backoffFactor:              2.0
+  jitterFraction:             0.25
+
+sqs:
+  heartbeatIntervalSec:       30
+  maxInFlight:                2             # lower than prod for easier local debugging
+  gracefulShutdownTimeoutSec: 250
+  visibilityTimeoutSec:       300

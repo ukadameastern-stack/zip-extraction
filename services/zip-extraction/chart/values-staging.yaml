@@ -1,0 +1,21 @@
+image:
+  digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+serviceAccount:
+  roleArn: "arn:aws:iam::111111111111:role/zip-extraction-staging"
+
+infra:
+  queueUrl: "https://sqs.eu-west-1.amazonaws.com/111111111111/zip-extraction-queue"
+  stagingBucket: "doc-uploader-staging-eu-west-1"
+
+sse:
+  mode: "SSE-KMS"
+  kmsKeyId: "arn:aws:kms:eu-west-1:111111111111:key/REPLACE-ME"
+
+logging:
+  level: info
+
+# Bomb-defence: legacy Office docs (.doc OLE2) compress at 100–300x; real bombs are 1000x+.
+# Absolute size caps (rules #2, #9, #10) remain the primary defence against resource exhaustion.
+bombDefence:
+  maxCompressionRatio: 1000

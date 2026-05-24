@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "schedule:weekly"],
+  "lockFileMaintenance": { "enabled": true },
+  "packageRules": [
+    {
+      "matchPackagePatterns": ["^github.com/aws/aws-sdk-go-v2"],
+      "groupName": "aws-sdk-go-v2"
+    },
+    {
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "pinDigests": true
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    }
+  ]
+}

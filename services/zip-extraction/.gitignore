@@ -1,0 +1,12 @@
+bin/
+*.pprof
+coverage.out
+cover.out
+sbom.cyclonedx.json
+.idea/
+.vscode/
+*.local.yaml
+*.local.yml
+.env
+.env.*
+/tmp/

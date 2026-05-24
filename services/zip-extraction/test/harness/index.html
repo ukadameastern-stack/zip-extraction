@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>zip-extraction test harness</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a1f29;
+      --panel2: #232936;
+      --text: #e6e6e6;
+      --muted: #8a93a3;
+      --accent: #4ec9b0;
+      --warn: #ffb86c;
+      --err: #ff5555;
+      --ok: #50fa7b;
+      --pending: #6272a4;
+      --border: #2d3441;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; line-height: 1.4; }
+    header { padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: 16px; }
+    header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+    header .sub { color: var(--muted); font-size: 13px; }
+    main { display: grid; grid-template-columns: minmax(360px, 1fr) 2fr; gap: 16px; padding: 16px 24px; }
+    section { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 16px; }
+    section h2 { margin: 0 0 12px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    input[type=text], input[type=file] { width: 100%; background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; font-size: 13px; }
+    input[type=file]::file-selector-button { background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; cursor: pointer; margin-right: 8px; }
+    .row { margin-bottom: 10px; }
+    button { background: var(--accent); color: #0a0a0a; border: 0; border-radius: 4px; padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; }
+    .badge.SUCCESS { background: rgba(80, 250, 123, 0.15); color: var(--ok); border: 1px solid var(--ok); }
+    .badge.PARTIAL_FAILED { background: rgba(255, 184, 108, 0.15); color: var(--warn); border: 1px solid var(--warn); }
+    .badge.FAILED { background: rgba(255, 85, 85, 0.15); color: var(--err); border: 1px solid var(--err); }
+    .badge.pending { background: rgba(98, 114, 164, 0.2); color: var(--pending); border: 1px solid var(--pending); }
+    .badge.UPLOADED { background: rgba(80, 250, 123, 0.12); color: var(--ok); border: 1px solid rgba(80, 250, 123, 0.5); }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; text-transform: uppercase; font-size: 10px; letter-spacing: 0.05em; }
+    pre { background: var(--panel2); border: 1px solid var(--border); border-radius: 4px; padding: 10px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 280px; overflow-y: auto; margin: 0; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .kv { display: flex; gap: 8px; font-size: 12px; }
+    .kv .k { color: var(--muted); min-width: 90px; }
+    .config-line { font-size: 11px; color: var(--muted); }
+    .config-line code { color: var(--accent); }
+    .stat { font-size: 12px; }
+    .stat .d { color: var(--warn); margin-left: 4px; }
+    .stat .v { color: var(--accent); }
+    footer { padding: 8px 24px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--border); }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>zip-extraction test harness</h1>
+    <span class="sub">developer-only — talks to LocalStack + the local service</span>
+  </header>
+
+  <main>
+    <section id="config-panel">
+      <h2>Submit</h2>
+      <div class="row">
+        <label>archive (.zip)</label>
+        <input type="file" id="file" accept=".zip,application/zip">
+      </div>
+      <div class="row">
+        <label>pipelineExecutionId</label>
+        <input type="text" id="execId" placeholder="auto: exec-YYYYMMDDTHHMMSS.mmmZ">
+      </div>
+      <div class="grid2">
+        <div>
+          <label>tenantId</label>
+          <input type="text" id="tenantId" placeholder="tenant-harness">
+        </div>
+        <div>
+          <label>documentId</label>
+          <input type="text" id="documentId" placeholder="auto">
+        </div>
+      </div>
+      <div class="row" style="margin-top: 14px;">
+        <button id="submit">Send to SQS</button>
+        <span id="submit-status" class="muted" style="margin-left: 10px;"></span>
+      </div>
+
+      <h2 style="margin-top: 24px;">LocalStack target</h2>
+      <div id="cfg-lines"></div>
+    </section>
+
+    <section id="result-panel">
+      <h2>Result <span id="status-badge" class="badge pending">idle</span></h2>
+      <div class="muted" id="result-hint">Submit a ZIP to start.</div>
+
+      <div id="result-summary" style="display: none;">
+        <div class="kv"><span class="k">exec id</span><span class="mono" id="r-exec"></span></div>
+        <div class="kv"><span class="k">source key</span><span class="mono" id="r-source"></span></div>
+        <div class="kv"><span class="k">SQS message id</span><span class="mono" id="r-msgid"></span></div>
+        <div class="kv"><span class="k">slipsheet</span><span class="mono" id="r-slip"></span></div>
+        <div class="kv"><span class="k">archive status</span><span id="r-status"></span></div>
+        <div class="kv"><span class="k">failure reason</span><span class="mono" id="r-reason"></span></div>
+        <div class="kv"><span class="k">failure detail</span><span id="r-detail" style="color: var(--warn);"></span></div>
+        <div class="kv"><span class="k">written at</span><span class="mono" id="r-when"></span></div>
+        <div class="kv"><span class="k">child count</span><span class="mono" id="r-count"></span></div>
+      </div>
+
+      <h2 style="margin-top: 18px;">DynamoDB rows</h2>
+      <table>
+        <thead><tr><th>SK</th><th>Status</th><th>Child key</th><th>MIME</th><th>Size</th><th>Failure reason</th><th>Failure detail</th></tr></thead>
+        <tbody id="ddb-tbody"><tr><td colspan="7" class="muted">no rows</td></tr></tbody>
+      </table>
+
+      <h2 style="margin-top: 18px;">S3 input/{exec}/* listing</h2>
+      <pre id="s3-list" class="mono">(empty)</pre>
+
+      <h2 style="margin-top: 18px;">Slipsheet JSON</h2>
+      <pre id="slipsheet-json" class="mono">(not yet written)</pre>
+
+      <h2 style="margin-top: 18px;">Service /metrics (zip_*) <span id="metrics-state" class="muted" style="font-size:11px; text-transform:none; letter-spacing:0;"></span></h2>
+      <pre id="metrics" class="mono">(polling…)</pre>
+    </section>
+  </main>
+
+  <footer>
+    Polls <code>/api/result</code> every 700 ms after submit until a slipsheet appears.
+    Service must be running on <code>:8080</code>; LocalStack on <code>:4566</code>.
+  </footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+let pollTimer = null;
+let metricsBaseline = null;
+
+async function loadConfig() {
+  try {
+    const cfg = await fetch("/api/config").then(r => r.json());
+    $("cfg-lines").innerHTML = [
+      `<div class="config-line">endpoint: <code>${cfg.endpointUrl}</code></div>`,
+      `<div class="config-line">region: <code>${cfg.region}</code></div>`,
+      `<div class="config-line">source bucket: <code>${cfg.sourceBucket}</code></div>`,
+      `<div class="config-line">staging bucket: <code>${cfg.stagingBucket}</code></div>`,
+      `<div class="config-line">queue: <code>${cfg.queueUrl}</code></div>`,
+      `<div class="config-line">ddb table: <code>${cfg.dynamoTable}</code></div>`,
+    ].join("");
+  } catch (e) {
+    $("cfg-lines").textContent = "(config not reachable)";
+  }
+}
+
+function setBadge(status) {
+  const el = $("status-badge");
+  el.className = "badge " + (status || "pending");
+  el.textContent = status || "pending";
+}
+
+async function pollMetrics(reset) {
+  try {
+    const text = await fetch("/api/metrics").then(r => r.text());
+    const parsed = {};
+    text.split("\n").forEach(line => {
+      const m = line.match(/^([^\s{]+(?:\{[^}]*\})?)\s+([0-9.eE+-]+)$/);
+      if (m) parsed[m[1]] = Number(m[2]);
+    });
+    if (reset || !metricsBaseline) {
+      metricsBaseline = parsed;
+      $("metrics-state").textContent = "(baseline captured at submit time)";
+    }
+    // Render with deltas vs. baseline.
+    const lines = Object.keys(parsed).sort().map(k => {
+      const v = parsed[k];
+      const b = metricsBaseline[k] || 0;
+      const d = v - b;
+      const ds = d > 0 ? ` <span class="d">(+${d})</span>` : "";
+      return `<span class="stat"><span class="v">${k}</span> = ${v}${ds}</span>`;
+    });
+    $("metrics").innerHTML = lines.join("\n");
+  } catch (e) {
+    $("metrics").textContent = "(service /metrics unreachable: " + e.message + ")";
+  }
+}
+
+async function pollResult(execId) {
+  try {
+    const data = await fetch(`/api/result?execId=${encodeURIComponent(execId)}`).then(r => r.json());
+
+    // DDB rows
+    const tbody = $("ddb-tbody");
+    if (!data.ddbRows || data.ddbRows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="muted">no rows yet</td></tr>';
+    } else {
+      tbody.innerHTML = data.ddbRows.map(r => `
+        <tr>
+          <td class="mono">${r.entryIndex || ""}</td>
+          <td><span class="badge ${r.status || ""}">${r.status || ""}</span></td>
+          <td class="mono">${r.childKey || ""}</td>
+          <td class="mono">${r.mimeType || ""}</td>
+          <td class="mono">${r.sizeBytes || ""}</td>
+          <td class="mono">${r.failureReason || ""}</td>
+          <td style="color: var(--warn); font-size: 11px;">${r.failureDetail || ""}</td>
+        </tr>
+      `).join("");
+    }
+
+    // S3 listing
+    $("s3-list").textContent = (data.s3Listing && data.s3Listing.length) ? data.s3Listing.join("\n") : "(empty)";
+
+    // Slipsheet + state
+    if (data.slipsheet) {
+      $("slipsheet-json").textContent = JSON.stringify(data.slipsheet, null, 2);
+      setBadge(data.slipsheet.status);
+      $("r-status").innerHTML = `<span class="badge ${data.slipsheet.status}">${data.slipsheet.status}</span>`;
+      $("r-reason").textContent = data.slipsheet.failureReason || "—";
+      $("r-detail").textContent = data.slipsheet.failureDetail || "—";
+      $("r-when").textContent = data.slipsheet.writtenAt || "—";
+      $("r-count").textContent = data.slipsheet.childCount;
+      $("r-slip").textContent = `s3://${(await fetch("/api/config").then(r=>r.json())).stagingBucket}/slipsheets/${execId}.json`;
+    } else {
+      setBadge("pending");
+    }
+
+    pollMetrics(false);
+
+    if (data.state === "complete") {
+      $("submit-status").textContent = "complete";
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  } catch (e) {
+    $("submit-status").textContent = "poll error: " + e.message;
+  }
+}
+
+$("submit").addEventListener("click", async () => {
+  const file = $("file").files[0];
+  if (!file) { alert("pick a .zip file first"); return; }
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+
+  $("submit").disabled = true;
+  $("submit-status").textContent = "uploading…";
+  setBadge("pending");
+
+  const fd = new FormData();
+  fd.append("archive", file);
+  if ($("execId").value.trim()) fd.append("pipelineExecutionId", $("execId").value.trim());
+  if ($("tenantId").value.trim()) fd.append("tenantId", $("tenantId").value.trim());
+  if ($("documentId").value.trim()) fd.append("documentId", $("documentId").value.trim());
+
+  let resp;
+  try {
+    resp = await fetch("/api/submit", { method: "POST", body: fd });
+    if (!resp.ok) {
+      const t = await resp.text();
+      throw new Error(`${resp.status}: ${t}`);
+    }
+  } catch (e) {
+    $("submit-status").textContent = "submit failed: " + e.message;
+    $("submit").disabled = false;
+    return;
+  }
+
+  const data = await resp.json();
+  $("submit").disabled = false;
+  $("submit-status").textContent = "submitted; polling result…";
+  $("result-hint").style.display = "none";
+  $("result-summary").style.display = "block";
+  $("r-exec").textContent = data.pipelineExecutionId;
+  $("r-source").textContent = data.sourceKey;
+  $("r-msgid").textContent = data.sqsMessageId;
+  $("r-slip").textContent = "(not yet written)";
+
+  // capture metrics baseline at submit time so deltas show this run's contribution
+  pollMetrics(true);
+
+  // start polling
+  pollResult(data.pipelineExecutionId);
+  pollTimer = setInterval(() => pollResult(data.pipelineExecutionId), 700);
+});
+
+loadConfig();
+pollMetrics(true);
+setInterval(() => { if (!pollTimer) pollMetrics(false); }, 2000);
+</script>
+</body>
+</html>

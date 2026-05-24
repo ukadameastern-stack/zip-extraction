@@ -1,0 +1,52 @@
+# docker-compose for local development (FR-15.2 / Q5 of requirements).
+# LocalStack provides SQS / S3 / DynamoDB / STS emulation; the service container
+# is built from the local Dockerfile and runs against LocalStack via
+# AWS_ENDPOINT_URL.
+#
+# Bring up:  make up && make bootstrap
+# Tear down: make down
+
+services:
+  localstack:
+    image: localstack/localstack:3.7
+    # TODO(security): pin by digest for production-parity per SECURITY-10:
+    # image: localstack/localstack@sha256:<digest>
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: sqs,s3,dynamodb,sts
+      DEBUG: "0"
+      AWS_DEFAULT_REGION: eu-west-1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    stop_grace_period: 5s
+
+  zip-extraction:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      AWS_REGION: eu-west-1
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      QUEUE_URL: http://localstack:4566/000000000000/zip-extraction-queue
+      STAGING_BUCKET: doc-uploader-staging-local
+      DYNAMO_TABLE: pipeline_files
+      LOG_FORMAT: console
+      LOG_LEVEL: debug
+      HTTP_PORT: "8080"
+      SSE_MODE: SSE-S3
+      CONFIG_PATH: /etc/zip-extraction/config.yaml
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config-local.yaml:/etc/zip-extraction/config.yaml:ro
+    # Drain window matches the application's gracefulShutdownTimeoutSec + 20s margin (NFR-Z-022).
+    stop_grace_period: 270s

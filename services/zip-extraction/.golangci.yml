@@ -1,0 +1,59 @@
+# golangci-lint config for the zip-extraction service.
+# Enabled rules per NFR-Z-072 and `tech-stack-decisions.md` §10.
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - gocritic
+    - gosec
+    - unused
+    - unparam
+    - unconvert
+    - gofmt
+    - goimports
+    - revive
+
+linters-settings:
+  govet:
+    enable-all: true
+  gosec:
+    excludes:
+      - G104    # errcheck handles unhandled errors; gosec duplicates
+    severity: low
+    confidence: medium
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+        arguments:
+          - "checkPrivateReceivers"
+          - "disableStutteringCheck"
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+      - style
+    disabled-checks:
+      - whyNoLint
+      - hugeParam
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+        - revive
+    - path: test/generators/
+      linters:
+        - revive       # internal test utilities; godoc not required
+  max-issues-per-linter: 0
+  max-same-issues: 0
