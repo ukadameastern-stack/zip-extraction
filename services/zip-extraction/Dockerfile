@@ -8,7 +8,7 @@
 #   docker manifest inspect gcr.io/distroless/static-debian12:nonroot | jq '.manifests[0].digest'
 
 # ---------- Builder stage ----------
-FROM --platform=$BUILDPLATFORM golang:1.24-bookworm AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS builder
 # TODO(security): replace builder FROM line above with digest-pinned reference, e.g.
 # FROM --platform=$BUILDPLATFORM golang:1.24-bookworm@sha256:<digest> AS builder
 
