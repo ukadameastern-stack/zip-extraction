@@ -1,9 +1,12 @@
 # Build outputs
 **/bin/
 **/*.pprof
-**/cover.out
+**/cover*.out
 **/coverage.out
 **/sbom.cyclonedx.json
+# Bare-binary outputs at the service root (Go produces these for `go build ./test/harness`)
+/services/zip-extraction/harness
+/services/zip-extraction/zip-extraction
 
 # Editor / IDE state
 .idea/
