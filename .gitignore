@@ -1,0 +1,30 @@
+# Build outputs
+**/bin/
+**/*.pprof
+**/cover.out
+**/coverage.out
+**/sbom.cyclonedx.json
+
+# Editor / IDE state
+.idea/
+.vscode/
+*.swp
+*~
+
+# Environment / secrets
+.env
+.env.*
+*.local.yaml
+*.local.yml
+
+# OS detritus
+.DS_Store
+Thumbs.db
+
+# Test fixtures kept locally
+/tmp/
+test/testdata/local-*
+
+# Go module cache (not usually committed; just in case)
+go.work
+go.work.sum
