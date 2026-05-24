@@ -13,7 +13,7 @@ require (
 	github.com/prometheus/client_golang v1.20.0
 	github.com/stretchr/testify v1.9.0
 	github.com/testcontainers/testcontainers-go/modules/localstack v0.33.0
-	go.uber.org/zap v1.27.0
+	go.uber.org/zap v1.28.0
 	gopkg.in/yaml.v3 v3.0.1
 	pgregory.net/rapid v1.1.0
 )
