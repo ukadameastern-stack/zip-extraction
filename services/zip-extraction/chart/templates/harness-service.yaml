@@ -1,0 +1,19 @@
+{{- if .Values.harness.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "zip-extraction.fullname" . }}-harness
+  labels:
+    {{- include "zip-extraction.labels" . | nindent 4 }}
+    app.kubernetes.io/component: harness
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "zip-extraction.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: harness
+  ports:
+    - name: http
+      port: 80
+      targetPort: 9000
+      protocol: TCP
+{{- end }}

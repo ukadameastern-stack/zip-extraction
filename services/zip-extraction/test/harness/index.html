@@ -51,6 +51,19 @@
     .stat { font-size: 12px; }
     .stat .d { color: var(--warn); margin-left: 4px; }
     .stat .v { color: var(--accent); }
+    .full { grid-column: 1 / -1; }
+    .queue-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+    .qbox { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+    .qbox .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .qbox .value { font-size: 22px; font-weight: 600; color: var(--accent); margin-top: 4px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    .qbox.warn .value { color: var(--warn); }
+    .qbox.err .value { color: var(--err); }
+    .qbox .sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .runs-table tr { cursor: pointer; }
+    .runs-table tr:hover td { background: var(--panel2); }
+    .panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .panel-head h2 { margin: 0; }
+    .panel-head .live { font-size: 10px; color: var(--muted); text-transform: none; letter-spacing: 0; }
     footer { padding: 8px 24px; color: var(--muted); font-size: 11px; border-top: 1px solid var(--border); }
     a { color: var(--accent); }
   </style>
@@ -62,6 +75,57 @@
   </header>
 
   <main>
+    <section class="full">
+      <div class="panel-head">
+        <h2>Queue depth</h2>
+        <span class="live" id="queue-updated">—</span>
+      </div>
+      <div class="queue-grid">
+        <div class="qbox" id="q-main-visible">
+          <div class="label">main · visible</div>
+          <div class="value">—</div>
+          <div class="sub">waiting to be picked up</div>
+        </div>
+        <div class="qbox" id="q-main-inflight">
+          <div class="label">main · in-flight</div>
+          <div class="value">—</div>
+          <div class="sub">received, not yet deleted</div>
+        </div>
+        <div class="qbox" id="q-main-delayed">
+          <div class="label">main · delayed</div>
+          <div class="value">—</div>
+          <div class="sub">scheduled for later</div>
+        </div>
+        <div class="qbox" id="q-dlq-visible">
+          <div class="label">dlq · visible</div>
+          <div class="value">—</div>
+          <div class="sub">poison messages</div>
+        </div>
+        <div class="qbox" id="q-dlq-inflight">
+          <div class="label">dlq · in-flight</div>
+          <div class="value">—</div>
+          <div class="sub">being inspected</div>
+        </div>
+        <div class="qbox" id="q-dlq-delayed">
+          <div class="label">dlq · delayed</div>
+          <div class="value">—</div>
+          <div class="sub">scheduled for later</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="full">
+      <div class="panel-head">
+        <h2>Past extractions <span style="color: var(--muted); font-size: 11px; text-transform: none; letter-spacing: 0;">— newest first, max 50</span></h2>
+        <span class="live" id="runs-updated">—</span>
+      </div>
+      <table class="runs-table">
+        <thead><tr><th>Exec id</th><th>Source archive</th><th>Tenant</th><th>Size</th><th>Children</th><th>Status</th><th>Written at</th><th>Failure reason</th></tr></thead>
+        <tbody id="runs-tbody"><tr><td colspan="8" class="muted">loading…</td></tr></tbody>
+      </table>
+      <div class="muted" style="font-size: 11px; margin-top: 8px;">Click a row to load that run into the Result panel below.</div>
+    </section>
+
     <section id="config-panel">
       <h2>Submit</h2>
       <div class="row">
@@ -131,6 +195,14 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+
+function humanSize(n) {
+  if (n === undefined || n === null || n === 0) return "—";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0; let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? v.toFixed(0) : v.toFixed(v < 10 ? 2 : 1)) + " " + u[i];
+}
 
 let pollTimer = null;
 let metricsBaseline = null;
@@ -280,9 +352,76 @@ $("submit").addEventListener("click", async () => {
   pollTimer = setInterval(() => pollResult(data.pipelineExecutionId), 700);
 });
 
+function setQBox(id, n, danger) {
+  const el = $(id);
+  if (!el) return;
+  el.querySelector(".value").textContent = (n === undefined || n === null) ? "—" : n;
+  el.classList.remove("warn", "err");
+  if (danger && n > 0) el.classList.add(danger);
+}
+
+async function pollQueue() {
+  try {
+    const q = await fetch("/api/queue").then(r => r.json());
+    setQBox("q-main-visible",  q.main.visible);
+    setQBox("q-main-inflight", q.main.inFlight);
+    setQBox("q-main-delayed",  q.main.delayed);
+    setQBox("q-dlq-visible",   q.dlq.visible, "err");
+    setQBox("q-dlq-inflight",  q.dlq.inFlight, "warn");
+    setQBox("q-dlq-delayed",   q.dlq.delayed, "warn");
+    $("queue-updated").textContent = "updated " + new Date().toLocaleTimeString();
+  } catch (e) {
+    $("queue-updated").textContent = "queue endpoint error: " + e.message;
+  }
+}
+
+function loadRunIntoResult(execId) {
+  $("result-hint").style.display = "none";
+  $("result-summary").style.display = "block";
+  $("r-exec").textContent = execId;
+  $("r-source").textContent = "(historical run — uploaded earlier)";
+  $("r-msgid").textContent = "—";
+  $("r-slip").textContent = "(loading…)";
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  pollResult(execId);
+}
+
+async function pollRuns() {
+  try {
+    const data = await fetch("/api/runs").then(r => r.json());
+    const tbody = $("runs-tbody");
+    if (!data.runs || data.runs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="muted">(no past runs yet)</td></tr>';
+    } else {
+      tbody.innerHTML = data.runs.map(r => `
+        <tr data-exec="${r.execId}">
+          <td class="mono">${r.execId}</td>
+          <td class="mono">${r.sourceArchive || ""}</td>
+          <td class="mono">${r.tenantId || "—"}</td>
+          <td class="mono">${humanSize(r.sourceSizeBytes)}</td>
+          <td class="mono">${r.childCount}</td>
+          <td><span class="badge ${r.status || ""}">${r.status || ""}</span></td>
+          <td class="mono">${r.writtenAt || ""}</td>
+          <td style="color: var(--warn); font-size: 11px;">${r.failureReason || ""}</td>
+        </tr>
+      `).join("");
+      tbody.querySelectorAll("tr[data-exec]").forEach(tr => {
+        tr.addEventListener("click", () => loadRunIntoResult(tr.dataset.exec));
+      });
+    }
+    $("runs-updated").textContent = "updated " + new Date().toLocaleTimeString() + " · " + (data.runs ? data.runs.length : 0) + " run(s)";
+  } catch (e) {
+    $("runs-updated").textContent = "runs endpoint error: " + e.message;
+  }
+}
+
 loadConfig();
 pollMetrics(true);
+pollQueue();
+pollRuns();
 setInterval(() => { if (!pollTimer) pollMetrics(false); }, 2000);
+setInterval(pollQueue, 2000);
+setInterval(pollRuns, 4000);
 </script>
 </body>
 </html>

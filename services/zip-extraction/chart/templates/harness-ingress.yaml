@@ -1,0 +1,34 @@
+{{- if and .Values.harness.enabled .Values.harness.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "zip-extraction.fullname" . }}-harness
+  labels:
+    {{- include "zip-extraction.labels" . | nindent 4 }}
+    app.kubernetes.io/component: harness
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /api/config
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/success-codes: "200"
+    alb.ingress.kubernetes.io/inbound-cidrs: {{ .Values.harness.ingress.inboundCidrs | quote }}
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=0
+    {{- if .Values.harness.ingress.albTags }}
+    alb.ingress.kubernetes.io/tags: {{ .Values.harness.ingress.albTags | quote }}
+    {{- end }}
+spec:
+  rules:
+    - host: {{ .Values.harness.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "zip-extraction.fullname" . }}-harness
+                port:
+                  number: 80
+{{- end }}

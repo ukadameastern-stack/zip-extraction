@@ -14,7 +14,8 @@ IMG_REPO   ?= 537462380503.dkr.ecr.eu-west-1.amazonaws.com/doc-uploader-sandbox/
 IMG_TAG    ?= dev-$(shell git rev-parse --short HEAD 2>/dev/null || echo "untracked")
 PLATFORMS  ?= linux/amd64,linux/arm64
 
-.PHONY: help build test lint vuln sbom up down bootstrap run docker docker-multiarch helm-template helm-lint pbt-replay harness clean
+.PHONY: help build test lint vuln sbom up down bootstrap run docker docker-multiarch helm-template helm-lint pbt-replay harness clean \
+        deploy-dev05 undeploy-dev05 list-dev05 logs-dev05 dev05-helm-install dev05-bootstrap dev05-push dev05-helm-deploy dev05-route53-bind dev05-route53-unbind dev05-teardown-k8s dev05-teardown-aws
 
 help:
 	@echo "Targets:"
@@ -33,6 +34,12 @@ help:
 	@echo "  helm-lint        - lint Helm chart"
 	@echo "  pbt-replay       - replay a PBT failure (SEED=<n>)"
 	@echo "  clean            - remove bin/ and CI artefacts"
+	@echo ""
+	@echo "DEV05 (AWS account 537462380503 / eu-west-1 / DEV05-EKS-CLUSTER):"
+	@echo "  deploy-dev05     - full bootstrap: AWS resources + image push + helm install. Logs to deploy/dev05/logs/deploy-*.log"
+	@echo "  undeploy-dev05   - reverse of deploy-dev05; reads deploy/dev05/state.json. Logs to deploy/dev05/logs/undeploy-*.log"
+	@echo "  list-dev05       - show what's deployed (from state.json + live AWS/K8s checks)"
+	@echo "  logs-dev05       - aggregate every DEV05 log (deploy/undeploy + K8s events + pod logs). Vars: DEV05_LOG_LINES=N, FOLLOW=1"
 
 build:
 	$(GO) build -trimpath -o bin/zip-extraction ./cmd/zip-extraction
@@ -98,3 +105,81 @@ harness:
 
 clean:
 	rm -rf bin/ sbom.cyclonedx.json coverage.out cover.out
+
+# -------------------------------------------------------------------------
+# DEV05 deploy / revert
+# -------------------------------------------------------------------------
+# Every step writes its full output to deploy/dev05/logs/<phase>-<timestamp>.log
+# AND streams to the terminal (tee). `latest.log` is a symlink to the most
+# recent log for convenience.
+#
+# State of record: deploy/dev05/state.json (created by bootstrap, consumed by
+# everything else). Undeploy refuses to run without it.
+
+DEV05_LOG_DIR := deploy/dev05/logs
+DEV05_TS       = $(shell date -u +%Y%m%dT%H%M%SZ)
+
+dev05-helm-install:
+	@mkdir -p $(DEV05_LOG_DIR)
+	@bash deploy/dev05/install-helm.sh
+
+dev05-bootstrap: dev05-helm-install
+	@bash deploy/dev05/bootstrap-aws.sh
+
+dev05-push:
+	@bash deploy/dev05/push-image.sh
+
+dev05-helm-deploy:
+	@bash deploy/dev05/helm-deploy.sh
+
+dev05-route53-bind:
+	@bash deploy/dev05/route53-bind.sh
+
+dev05-route53-unbind:
+	@bash deploy/dev05/route53-unbind.sh
+
+dev05-teardown-k8s:
+	@bash deploy/dev05/teardown-k8s.sh
+
+dev05-teardown-aws:
+	@bash deploy/dev05/teardown-aws.sh
+
+deploy-dev05:
+	@mkdir -p $(DEV05_LOG_DIR)
+	@LOG=$(DEV05_LOG_DIR)/deploy-$(DEV05_TS).log; \
+	    echo "==> Logging to $$LOG"; \
+	    set -o pipefail; \
+	    ( \
+	        echo "### deploy-dev05 start $$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
+	        $(MAKE) --no-print-directory dev05-helm-install && \
+	        $(MAKE) --no-print-directory dev05-bootstrap && \
+	        $(MAKE) --no-print-directory dev05-push && \
+	        $(MAKE) --no-print-directory dev05-helm-deploy && \
+	        $(MAKE) --no-print-directory dev05-route53-bind; \
+	        rc=$$?; \
+	        echo "### deploy-dev05 end   $$(date -u +%Y-%m-%dT%H:%M:%SZ) rc=$$rc"; \
+	        exit $$rc \
+	    ) 2>&1 | tee "$$LOG"; \
+	    ln -sf "$$(basename "$$LOG")" $(DEV05_LOG_DIR)/latest-deploy.log
+
+undeploy-dev05:
+	@mkdir -p $(DEV05_LOG_DIR)
+	@LOG=$(DEV05_LOG_DIR)/undeploy-$(DEV05_TS).log; \
+	    echo "==> Logging to $$LOG"; \
+	    set -o pipefail; \
+	    ( \
+	        echo "### undeploy-dev05 start $$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
+	        $(MAKE) --no-print-directory dev05-route53-unbind && \
+	        $(MAKE) --no-print-directory dev05-teardown-k8s && \
+	        $(MAKE) --no-print-directory dev05-teardown-aws; \
+	        rc=$$?; \
+	        echo "### undeploy-dev05 end   $$(date -u +%Y-%m-%dT%H:%M:%SZ) rc=$$rc"; \
+	        exit $$rc \
+	    ) 2>&1 | tee "$$LOG"; \
+	    ln -sf "$$(basename "$$LOG")" $(DEV05_LOG_DIR)/latest-undeploy.log
+
+list-dev05:
+	@bash deploy/dev05/list.sh
+
+logs-dev05:
+	@bash deploy/dev05/logs.sh

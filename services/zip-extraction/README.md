@@ -117,6 +117,21 @@ helm upgrade --install zip-extraction ./chart \
 
 See `chart/README.md` for the platform-team integration guide (HPA, NetworkPolicy, VPC endpoints, IRSA policy, alert rules).
 
+### DEV05 ephemeral deploy (full bootstrap + revert)
+
+A self-contained per-developer environment on the shared DEV05 EKS cluster, with every AWS resource DEV05-prefixed so teardown is safe. All resources are tracked in `deploy/dev05/state.json` and removed by `make undeploy-dev05`.
+
+```bash
+make deploy-dev05         # AWS bootstrap (SQS/S3/DDB/IAM) → push image → helm install → Route 53 record
+make list-dev05           # what's deployed (state.json + live AWS/K8s checks)
+make logs-dev05           # aggregated logs: deploy/undeploy files + K8s events + pod logs
+make undeploy-dev05       # full revert: Route 53 → helm uninstall → namespace → AWS resources
+```
+
+Per-run logs land in `deploy/dev05/logs/{deploy,undeploy}-<UTC>.log` (gitignored). The end-to-end inventory + design contract is `deploy/dev05-resources.md`.
+
+The DEV05 deploy also stands up the developer **test harness** behind an IP-allowlisted public ALB at `http://zip-extraction-dev-sandbox-v1.dev05.k8s.opus2dev.com/`. The harness reuses the service's IRSA role (same SQS/S3/DDB perms). See `test/harness/README.md` for the developer-tool details.
+
 ## Testing Gates
 
 | Gate | Command | What it runs |

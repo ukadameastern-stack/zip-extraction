@@ -21,6 +21,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +32,7 @@ import (
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	awssqs "github.com/aws/aws-sdk-go-v2/service/sqs"
+	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
 //go:embed index.html
@@ -40,6 +43,7 @@ type config struct {
 	endpointURL     string
 	region          string
 	queueURL        string
+	dlqURL          string
 	sourceBucket    string
 	stagingBucket   string
 	dynamoTable     string
@@ -52,6 +56,7 @@ func main() {
 	flag.StringVar(&c.endpointURL, "endpoint-url", "http://localhost:4566", "AWS SDK endpoint override (LocalStack)")
 	flag.StringVar(&c.region, "region", "eu-west-1", "AWS region")
 	flag.StringVar(&c.queueURL, "queue-url", "http://localhost:4566/000000000000/zip-extraction-queue", "SQS main queue URL")
+	flag.StringVar(&c.dlqURL, "dlq-url", "http://localhost:4566/000000000000/zip-extraction-dlq", "SQS dead-letter queue URL")
 	flag.StringVar(&c.sourceBucket, "source-bucket", "doc-uploader-uploads-local", "S3 source bucket where ZIPs are uploaded")
 	flag.StringVar(&c.stagingBucket, "staging-bucket", "doc-uploader-staging-local", "S3 staging bucket")
 	flag.StringVar(&c.dynamoTable, "dynamo-table", "pipeline_files", "DynamoDB table")
@@ -59,23 +64,34 @@ func main() {
 	flag.Parse()
 
 	ctx := context.Background()
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx,
-		awsconfig.WithRegion(c.region),
-		awsconfig.WithCredentialsProvider(staticCreds{}),
-	)
+	// LocalStack accepts any access key; real AWS needs IRSA/env creds from the
+	// default chain. Pick by whether an explicit endpoint URL is set.
+	cfgOpts := []func(*awsconfig.LoadOptions) error{awsconfig.WithRegion(c.region)}
+	if c.endpointURL != "" {
+		cfgOpts = append(cfgOpts, awsconfig.WithCredentialsProvider(staticCreds{}))
+	}
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, cfgOpts...)
 	if err != nil {
 		log.Fatalf("aws config: %v", err)
 	}
 
+	// Empty endpoint-url means "use the default AWS endpoint" (real AWS in
+	// DEV05/prod). Only override when explicitly set (typically LocalStack).
 	s3Client := awss3.NewFromConfig(awsCfg, func(o *awss3.Options) {
-		o.BaseEndpoint = aws.String(c.endpointURL)
-		o.UsePathStyle = true
+		if c.endpointURL != "" {
+			o.BaseEndpoint = aws.String(c.endpointURL)
+			o.UsePathStyle = true
+		}
 	})
 	sqsClient := awssqs.NewFromConfig(awsCfg, func(o *awssqs.Options) {
-		o.BaseEndpoint = aws.String(c.endpointURL)
+		if c.endpointURL != "" {
+			o.BaseEndpoint = aws.String(c.endpointURL)
+		}
 	})
 	ddbClient := awsddb.NewFromConfig(awsCfg, func(o *awsddb.Options) {
-		o.BaseEndpoint = aws.String(c.endpointURL)
+		if c.endpointURL != "" {
+			o.BaseEndpoint = aws.String(c.endpointURL)
+		}
 	})
 
 	srv := &server{cfg: c, s3: s3Client, sqs: sqsClient, ddb: ddbClient, httpc: &http.Client{Timeout: 5 * time.Second}}
@@ -86,12 +102,15 @@ func main() {
 	mux.HandleFunc("/api/result", srv.handleResult)
 	mux.HandleFunc("/api/metrics", srv.handleMetrics)
 	mux.HandleFunc("/api/config", srv.handleConfig)
+	mux.HandleFunc("/api/queue", srv.handleQueue)
+	mux.HandleFunc("/api/runs", srv.handleRuns)
 
 	log.Printf("zip-extraction harness listening on %s", c.listenAddr)
 	log.Printf("  endpoint:        %s", c.endpointURL)
 	log.Printf("  source bucket:   %s", c.sourceBucket)
 	log.Printf("  staging bucket:  %s", c.stagingBucket)
 	log.Printf("  queue:           %s", c.queueURL)
+	log.Printf("  dlq:             %s", c.dlqURL)
 	log.Printf("  dynamodb table:  %s", c.dynamoTable)
 	log.Printf("  service metrics: %s", c.serviceMetricsURL)
 	if err := http.ListenAndServe(c.listenAddr, mux); err != nil {
@@ -166,18 +185,24 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	correlationID := stringDefault(r.FormValue("correlationId"), "corr-"+execID)
 	execID = sanitiseID(execID)
 
-	body, err := io.ReadAll(file)
-	if err != nil {
-		http.Error(w, "read upload: "+err.Error(), http.StatusBadRequest)
-		return
-	}
 	sourceKey := "uploads/" + execID + "-" + header.Filename
 
+	// `file` is a multipart.File which implements io.ReadSeeker — stream it
+	// straight to S3. Avoids io.ReadAll + string copy + Reader wrap that used
+	// to triple peak memory and OOMKill the pod on ~50MB uploads.
+	// Stash the submitter-supplied IDs as S3 object metadata so /api/runs can
+	// surface them on the past-extractions table without changing the service.
 	_, err = s.s3.PutObject(r.Context(), &awss3.PutObjectInput{
-		Bucket:      aws.String(s.cfg.sourceBucket),
-		Key:         aws.String(sourceKey),
-		Body:        strings.NewReader(string(body)),
-		ContentType: aws.String("application/zip"),
+		Bucket:        aws.String(s.cfg.sourceBucket),
+		Key:           aws.String(sourceKey),
+		Body:          file,
+		ContentType:   aws.String("application/zip"),
+		ContentLength: aws.Int64(header.Size),
+		Metadata: map[string]string{
+			"tenant-id":      tenantID,
+			"document-id":    documentID,
+			"correlation-id": correlationID,
+		},
 	})
 	if err != nil {
 		http.Error(w, "S3 PutObject: "+err.Error(), http.StatusBadGateway)
@@ -321,6 +346,140 @@ func (s *server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte(strings.Join(keep, "\n")))
+}
+
+type queueDepth struct {
+	Visible  int `json:"visible"`
+	InFlight int `json:"inFlight"`
+	Delayed  int `json:"delayed"`
+}
+
+type queueResp struct {
+	Main  queueDepth `json:"main"`
+	DLQ   queueDepth `json:"dlq"`
+	Error string     `json:"error,omitempty"`
+}
+
+func (s *server) handleQueue(w http.ResponseWriter, r *http.Request) {
+	resp := queueResp{}
+	resp.Main = s.queueDepthFor(r.Context(), s.cfg.queueURL)
+	resp.DLQ = s.queueDepthFor(r.Context(), s.cfg.dlqURL)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *server) queueDepthFor(ctx context.Context, url string) queueDepth {
+	out, err := s.sqs.GetQueueAttributes(ctx, &awssqs.GetQueueAttributesInput{
+		QueueUrl: aws.String(url),
+		AttributeNames: []sqstypes.QueueAttributeName{
+			sqstypes.QueueAttributeNameApproximateNumberOfMessages,
+			sqstypes.QueueAttributeNameApproximateNumberOfMessagesNotVisible,
+			sqstypes.QueueAttributeNameApproximateNumberOfMessagesDelayed,
+		},
+	})
+	if err != nil {
+		return queueDepth{}
+	}
+	parse := func(k string) int {
+		v, ok := out.Attributes[k]
+		if !ok {
+			return 0
+		}
+		n, _ := strconv.Atoi(v)
+		return n
+	}
+	return queueDepth{
+		Visible:  parse("ApproximateNumberOfMessages"),
+		InFlight: parse("ApproximateNumberOfMessagesNotVisible"),
+		Delayed:  parse("ApproximateNumberOfMessagesDelayed"),
+	}
+}
+
+type runSummary struct {
+	ExecID          string `json:"execId"`
+	SourceArchive   string `json:"sourceArchive"`
+	TenantID        string `json:"tenantId,omitempty"`
+	SourceSizeBytes int64  `json:"sourceSizeBytes,omitempty"`
+	ChildCount      int    `json:"childCount"`
+	Status          string `json:"status"`
+	WrittenAt       string `json:"writtenAt"`
+	FailureReason   string `json:"failureReason,omitempty"`
+	SlipsheetKey    string `json:"slipsheetKey"`
+}
+
+type runsResp struct {
+	Runs  []runSummary `json:"runs"`
+	Error string       `json:"error,omitempty"`
+}
+
+func (s *server) handleRuns(w http.ResponseWriter, r *http.Request) {
+	listOut, err := s.s3.ListObjectsV2(r.Context(), &awss3.ListObjectsV2Input{
+		Bucket: aws.String(s.cfg.stagingBucket),
+		Prefix: aws.String("slipsheets/"),
+	})
+	if err != nil {
+		writeJSON(w, http.StatusOK, runsResp{Runs: []runSummary{}, Error: err.Error()})
+		return
+	}
+
+	// Most recent first.
+	sort.Slice(listOut.Contents, func(i, j int) bool {
+		ti := listOut.Contents[i].LastModified
+		tj := listOut.Contents[j].LastModified
+		if ti == nil || tj == nil {
+			return false
+		}
+		return ti.After(*tj)
+	})
+
+	const maxRuns = 50
+	runs := make([]runSummary, 0, len(listOut.Contents))
+	for i, obj := range listOut.Contents {
+		if i >= maxRuns {
+			break
+		}
+		key := aws.ToString(obj.Key)
+		execID := strings.TrimSuffix(strings.TrimPrefix(key, "slipsheets/"), ".json")
+
+		summary := runSummary{ExecID: execID, SlipsheetKey: key}
+
+		getOut, gerr := s.s3.GetObject(r.Context(), &awss3.GetObjectInput{
+			Bucket: aws.String(s.cfg.stagingBucket),
+			Key:    aws.String(key),
+		})
+		if gerr == nil {
+			body, _ := io.ReadAll(getOut.Body)
+			getOut.Body.Close()
+			var slip map[string]interface{}
+			if jerr := json.Unmarshal(body, &slip); jerr == nil {
+				summary.SourceArchive, _ = slip["sourceArchive"].(string)
+				summary.Status, _ = slip["status"].(string)
+				summary.WrittenAt, _ = slip["writtenAt"].(string)
+				summary.FailureReason, _ = slip["failureReason"].(string)
+				if cc, ok := slip["childCount"].(float64); ok {
+					summary.ChildCount = int(cc)
+				}
+			}
+		}
+
+		// HEAD the source archive to grab the upload's size + the tenantId we
+		// stashed on PutObject metadata. Best-effort: a missing source object
+		// (rare — e.g. lifecycle expiry) just leaves these fields empty.
+		if summary.SourceArchive != "" {
+			headOut, herr := s.s3.HeadObject(r.Context(), &awss3.HeadObjectInput{
+				Bucket: aws.String(s.cfg.sourceBucket),
+				Key:    aws.String(summary.SourceArchive),
+			})
+			if herr == nil {
+				if headOut.ContentLength != nil {
+					summary.SourceSizeBytes = *headOut.ContentLength
+				}
+				// S3 SDK lowercases user-metadata keys.
+				summary.TenantID = headOut.Metadata["tenant-id"]
+			}
+		}
+		runs = append(runs, summary)
+	}
+	writeJSON(w, http.StatusOK, runsResp{Runs: runs})
 }
 
 func writeJSON(w http.ResponseWriter, status int, body interface{}) {

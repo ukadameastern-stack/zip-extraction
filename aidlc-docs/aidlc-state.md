@@ -55,3 +55,4 @@
 
 ### 🟡 OPERATIONS PHASE
 - [x] Operations (placeholder reached — workflow terminal; future expansion out of scope per CLAUDE.md)
+- [x] **DEV05 ephemeral environment** (post-workflow, developer-driven 2026-05-25) — full bootstrap + revert via `make deploy-dev05` / `make undeploy-dev05`; AWS resources DEV05-prefixed for safe teardown; live state tracked in `deploy/dev05/state.json`; per-run logs in `deploy/dev05/logs/`; design contract in `deploy/dev05-resources.md`. Includes IP-allowlisted public ALB Ingress for the developer test harness at `zip-extraction-dev-sandbox-v1.dev05.k8s.opus2dev.com`. Nine deployment-time bugs surfaced and fixed; full session diary appended to `audit.md`.

@@ -31,3 +31,8 @@ test/testdata/local-*
 # Go module cache (not usually committed; just in case)
 go.work
 go.work.sum
+
+# DEV05 deploy runtime artefacts (live state + per-run logs)
+/services/zip-extraction/deploy/dev05/state.json
+/services/zip-extraction/deploy/dev05/state.*.completed.json
+/services/zip-extraction/deploy/dev05/logs/

@@ -1,0 +1,75 @@
+{{- if .Values.harness.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "zip-extraction.fullname" . }}-harness
+  labels:
+    {{- include "zip-extraction.labels" . | nindent 4 }}
+    app.kubernetes.io/component: harness
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "zip-extraction.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: harness
+  template:
+    metadata:
+      labels:
+        {{- include "zip-extraction.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: harness
+    spec:
+      # Reuses the same ServiceAccount as the main service. The IAM role
+      # already grants SQS send / S3 R/W / DDB query — which is exactly the
+      # superset the harness needs.
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: harness
+          image: "{{ .Values.harness.image.repository }}:{{ .Values.harness.image.tag }}{{- if .Values.harness.image.digest }}@{{ .Values.harness.image.digest }}{{- end }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          args:
+            - "-listen=:9000"
+            - "-endpoint-url="                       # empty → real AWS, not LocalStack
+            - "-region={{ .Values.infra.region }}"
+            - "-queue-url={{ .Values.infra.queueUrl }}"
+            - "-dlq-url={{ .Values.harness.dlqUrl }}"
+            - "-source-bucket={{ .Values.harness.sourceBucket }}"
+            - "-staging-bucket={{ .Values.infra.stagingBucket }}"
+            - "-dynamo-table={{ .Values.infra.dynamoTable }}"
+            - "-service-metrics-url=http://{{ include "zip-extraction.fullname" . }}:{{ .Values.service.port }}/metrics"
+          ports:
+            - name: http
+              containerPort: 9000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi    # large headroom; streaming PutObject means peak is multipart buffer + Go runtime, not the whole ZIP
+          readinessProbe:
+            httpGet:
+              path: /api/config
+              port: 9000
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/config
+              port: 9000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # /tmp is required by Go's multipart parser for uploads >32 MiB —
+          # the container has readOnlyRootFilesystem so we mount an emptyDir.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            {{- if .Values.volumes.tmp.medium }}
+            medium: {{ .Values.volumes.tmp.medium | quote }}
+            {{- end }}
+{{- end }}

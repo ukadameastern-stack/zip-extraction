@@ -103,3 +103,22 @@ sqs:
 
 http:
   port:                       8080
+
+# -------------------------------------------------------------------------
+# Developer harness (test/harness). Off by default. Per-env overlays toggle
+# this on with their own image + ingress allowlist.
+# DO NOT enable in production: harness has no authentication.
+# -------------------------------------------------------------------------
+harness:
+  enabled: false
+  image:
+    repository: ""
+    tag: ""
+    digest: ""
+  sourceBucket: ""              # uploads bucket the harness PUTs ZIPs into
+  dlqUrl: ""                    # SQS DLQ URL — surfaced in the harness queue-depth panel
+  ingress:
+    enabled: true
+    host: ""
+    inboundCidrs: ""            # comma-separated list, e.g. "1.2.3.4/32,5.6.7.0/24"
+    albTags: ""                 # optional "k=v,k=v" tag spec applied to the ALB

@@ -1,0 +1,21 @@
+# Per-Dockerfile ignore for the harness build (BuildKit picks this up when
+# `-f test/harness/Dockerfile` is used; otherwise the root .dockerignore wins).
+# Same as root .dockerignore but keeps `test/` in the context — the harness
+# source lives at test/harness/.
+
+.git/
+.github/
+aidlc-docs/
+*_test.go
+README*.md
+Makefile
+.golangci.yml
+.gitignore
+chart/
+deploy/
+docs/
+bin/
+*.pprof
+coverage.out
+cover.out
+sbom.cyclonedx.json

@@ -34,14 +34,19 @@ Then open <http://localhost:9000/>.
 
 ```
 -listen              :9000                                              harness HTTP port
--endpoint-url        http://localhost:4566                              LocalStack endpoint
+-endpoint-url        http://localhost:4566                              LocalStack endpoint; EMPTY (-endpoint-url=) means default real-AWS endpoints
 -region              eu-west-1                                          AWS region
 -queue-url           http://localhost:4566/000000000000/zip-extraction-queue
+-dlq-url             http://localhost:4566/000000000000/zip-extraction-dlq   surfaced in the queue-depth panel
 -source-bucket       doc-uploader-uploads-local                         where ZIPs are uploaded
 -staging-bucket      doc-uploader-staging-local                         where children + slipsheets land
 -dynamo-table        pipeline_files
 -service-metrics-url http://localhost:8080/metrics                      proxied for the metrics panel
 ```
+
+**Credential mode** is decided by `-endpoint-url`:
+- Empty → SDK's default credential chain (IRSA in K8s, `AWS_PROFILE`/env locally with real AWS)
+- Non-empty → hard-coded `test/test` credentials (LocalStack accepts anything)
 
 ## API surface
 
@@ -54,7 +59,21 @@ Then open <http://localhost:9000/>.
 
 `/api/config` — GET; the resolved flag values, for the UI to display.
 
+## Cloud deployment (DEV05 only)
+
+A `Dockerfile` and chart templates live alongside this source. The harness is OFF by default in the chart (`harness.enabled: false`) and only enabled in `values-dev05.yaml`. The DEV05 deploy stands it up behind an IP-allowlisted public ALB so developers can drive the real cloud pipeline from a browser.
+
+| | |
+|---|---|
+| URL | `http://zip-extraction-dev-sandbox-v1.dev05.k8s.opus2dev.com/` |
+| Access | ALB security-group allowlist (no auth) — set via `harness.ingress.inboundCidrs` |
+| Image | re-uses `…/zip-extraction-service` ECR repo, tag prefix `dev05-harness-` |
+| IRSA  | reuses the service's ServiceAccount; same SQS/S3/DDB permissions |
+| Resources | request `128Mi` memory / `50m` CPU; limit `512Mi` (large headroom for multipart uploads — streaming PutObject means peak is ~30–50 MiB regardless of ZIP size) |
+| `/tmp` | `emptyDir` volume — required by Go's `multipart.ParseMultipartForm` for uploads >32 MiB (the rest of the rootfs is read-only) |
+| Deploy | `make deploy-dev05` from the service dir |
+| Tear down | `make undeploy-dev05` (deletes namespace + ALB + Route 53 record + AWS resources) |
+
 ## Security note
 
-This binary has zero auth. **Do not deploy** — it's purely for local development.
-Production deployment artefacts live under `chart/` and `cmd/zip-extraction/` only.
+This binary has **zero auth** of its own. Public exposure is only acceptable in DEV05 because of the ALB-level CIDR allowlist. **Never deploy outside DEV05** without first putting an auth layer (OIDC sidecar / basic-auth Ingress annotation / VPN-only ingress) in front. Production deployment artefacts live under `chart/` (with `harness.enabled: false`) and `cmd/zip-extraction/` only.
