@@ -78,6 +78,13 @@ This document enumerates the business rules that govern every algorithmic decisi
 **Verification**: Unit tests `TestOverlapCheckRule11_Rejects` (overlap detected), `TestOverlapCheckRule11_AdjacentOK` (boundary touch passes), `TestOverlapCheckRule11_SortsBeforeWalking` (order-invariant), `TestOverlapCheckRule11_FewerThanTwoEntries` (degenerate inputs safe).
 **Operational note**: Tolerates `*zip.File.DataOffset()` errors on individual entries — surviving ranges are still pairwise-checked. A whole-archive DataOffset failure means zero ranges survive and OverlapCheck trivially passes; rule #1 / rule #2 still catch the resource-exhaustion symptom downstream.
 
+### BR-BOMB-010 — Pre-stream cap on total declared uncompressed size (rule #12)
+**Statement**: During central-directory parsing (`zip_open.go`), the service sums each entry's declared `UncompressedSize64` into `ArchiveMetadata.TotalDeclaredUncompressedBytes`. `bombdefence.PreCheck` then compares this aggregate against `MaxTotalDeclaredUncompressedBytes` (default **50 GB**) — a violation aborts the archive with `*BombDefenceError{Rule: 12}` BEFORE any streaming work. Rejects honestly-declared bombs whose central directory truthfully advertises an explosive expansion; they would otherwise be caught only by rule #2 (cumulative streaming cap at 2 GB) after the limiter had already done decompression work up to the cap.
+**Source**: FR-7 rule #12; operations checklist item "Max total declared size" (default 50 GB).
+**Trust model**: The declared `UncompressedSize64` value is **UNTRUSTED** (a malicious bomb-builder can lie about it). Rule #12 is therefore intentionally conservative — generous default (50 GB), opt-out via cap=0. The trusted authoritative ceiling remains rule #2 (`MaxExtractedSizeBytes`), enforced incrementally by the `LimitedReader` against bytes that have actually been decompressed. Rule #12 is defence-in-depth: cheap rejection of honest bombs without weakening the streaming guarantee.
+**Verification**: Unit tests `TestPreCheckRule12Rejects` (over-cap aggregate rejected), `TestPreCheckRule12AcceptsAtCap` (boundary inclusive at exact cap), `TestPreCheckRule12DisabledWhenZero` (cap=0 disables the rule; allows astronomical declared sizes without firing).
+**Operational note**: When raising rules 2/9 (extracted-size caps), consider whether rule 12 should rise in lockstep. Rule 12 caps the **declared** ceiling; rule 2 caps the **actual** streamed ceiling. They serve different defence roles — rule 12 is pre-stream + untrusted; rule 2 is mid-stream + trusted — so leaving rule 12 generously above rule 2 is the intended posture.
+
 ---
 
 ## BR-PATH: Path Validation

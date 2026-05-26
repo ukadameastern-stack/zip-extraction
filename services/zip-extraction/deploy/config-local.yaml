@@ -10,6 +10,7 @@ bombDefence:
   maxDirectoryDepth:          10
   maxSingleFileSizeBytes:     262144000    # 250 MB
   maxExtractionDurationSec:   240
+  maxTotalDeclaredUncompressedBytes: 53687091200  # 50 GB — rule #12 (BR-BOMB-010) pre-stream cap; see chart/values.yaml comment.
 
 streaming:
   maxInMemoryBufferBytes:     4194304      # 4 MB

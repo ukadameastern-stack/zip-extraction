@@ -28,6 +28,7 @@ bombDefence:
   maxDirectoryDepth:          10
   maxSingleFileSizeBytes:     262144000
   maxExtractionDurationSec:   240
+  maxTotalDeclaredUncompressedBytes: 53687091200
 streaming:
   maxInMemoryBufferBytes:     4194304
   multipartThresholdBytes:    5242880
@@ -142,6 +143,7 @@ func TestValidate_VariousBadValues(t *testing.T) {
 				MaxCompressedSizeBytes: 1, MaxExtractedSizeBytes: 1, MaxCompressionRatio: 1,
 				MaxEntryCount: 1, MaxDirectoryDepth: 1,
 				MaxSingleFileSizeBytes: 1, MaxExtractionDurationSec: 1,
+				MaxTotalDeclaredUncompressedBytes: 1,
 			},
 			Streaming: config.StreamingConfig{MaxInMemoryBufferBytes: 1, MultipartThresholdBytes: 5 * 1024 * 1024},
 			Retry:     config.RetryConfig{MaxAttempts: 1, BackoffBaseMillis: 1, BackoffFactor: 1, JitterFraction: 0},
@@ -167,6 +169,7 @@ func TestValidate_VariousBadValues(t *testing.T) {
 		{"zero-bomb-depth", func(c *config.Config) { c.BombDefence.MaxDirectoryDepth = 0 }, "maxDirectoryDepth"},
 		{"zero-bomb-single", func(c *config.Config) { c.BombDefence.MaxSingleFileSizeBytes = 0 }, "maxSingleFileSizeBytes"},
 		{"zero-bomb-duration", func(c *config.Config) { c.BombDefence.MaxExtractionDurationSec = 0 }, "maxExtractionDurationSec"},
+		{"zero-bomb-total-declared", func(c *config.Config) { c.BombDefence.MaxTotalDeclaredUncompressedBytes = 0 }, "maxTotalDeclaredUncompressedBytes"},
 		{"zero-stream-buffer", func(c *config.Config) { c.Streaming.MaxInMemoryBufferBytes = 0 }, "maxInMemoryBufferBytes"},
 		{"low-multipart", func(c *config.Config) { c.Streaming.MultipartThresholdBytes = 1024 }, "multipartThresholdBytes"},
 		{"zero-retry-attempts", func(c *config.Config) { c.Retry.MaxAttempts = 0 }, "retry.maxAttempts"},
@@ -199,6 +202,7 @@ func TestValidate_SSEKMSRequiresKey(t *testing.T) {
 			MaxCompressedSizeBytes: 1, MaxExtractedSizeBytes: 1,
 			MaxCompressionRatio: 1, MaxEntryCount: 1, MaxDirectoryDepth: 1,
 			MaxSingleFileSizeBytes: 1, MaxExtractionDurationSec: 1,
+			MaxTotalDeclaredUncompressedBytes: 1,
 		},
 		Streaming: config.StreamingConfig{MaxInMemoryBufferBytes: 1, MultipartThresholdBytes: 5 * 1024 * 1024},
 		Retry:     config.RetryConfig{MaxAttempts: 1, BackoffBaseMillis: 1, BackoffFactor: 1, JitterFraction: 0},

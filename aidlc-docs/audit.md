@@ -1186,3 +1186,32 @@ Operational implications:
 - Helm chart users picking up this change get the new 5 GB default automatically. **Backwards-compat note**: if an operator was relying on the implicit 500 MB ceiling as a DoS guard, they need to add an explicit override to their per-env values file. The other absolute caps (rule 2 = 2 GB extracted, rule 9 = 250 MB per file, rule 10 = 240 s wall-clock) remain unchanged and are the more meaningful ceilings against actual resource-exhaustion bombs.
 
 **Context**: Post-AI-DLC operations work; coupled service-config + harness UX change. The harness UX is the user-visible piece; the cap raise is the underlying capability that makes the new UX worth shipping.
+
+---
+
+## Post-deployment — Add BR-BOMB-010 (rule #12) total-declared-uncompressed pre-stream cap
+**Timestamp**: 2026-05-26T11:15:00Z
+**User Input**: Operations checklist pasted by user listed "Max total declared size" with default 50 GB as one of 6 expected defences. Audit showed 5/6 covered; the gap was that the service computed `TotalDeclaredUncompressedBytes` (sum of declared `UncompressedSize64` from central-directory headers) but never compared it to a config threshold — rule #2 (trusted streaming cap at 2 GB) would catch a honestly-declared bomb, but only after the limiter had already done decompression work. User approved adding the missing pre-stream check.
+**AI Response**: Added BR-BOMB-010 (rule #12) — pre-stream cap on the sum of declared uncompressed sizes. Inserted in `PreCheck` alongside rules #1 and #4 so honestly-declared bombs fail before any streaming work. The trusted ceiling (rule #2 = `MaxExtractedSizeBytes`, 2 GB) remains authoritative; rule #12 is defence-in-depth on cheap-but-untrusted metadata.
+
+Design decision: rule #12 uses the **untrusted** declared `UncompressedSize64` value, so the threshold is set generously (50 GB default, ~25× the trusted streaming cap) and a cap of 0 disables the rule entirely. The rule's purpose is to cheaply reject the subset of bombs that *truthfully* report their explosive size — adversarial bombs that lie about their size still flow through to rule #2 unchanged.
+
+Changed files:
+- `services/zip-extraction/internal/config/config.go` — `BombDefenceConfig.MaxTotalDeclaredUncompressedBytes int64` field (yaml: `maxTotalDeclaredUncompressedBytes`); validation block ensures > 0 (with the convention that operators wanting to disable the rule set it to a very large number rather than 0, since validation rejects 0; the runtime `> 0` guard in `PreCheck` is defensive for future direct-construction callers).
+- `services/zip-extraction/internal/bombdefence/checker.go` — `PreCheck` now compares `meta.TotalDeclaredUncompressedBytes > c.cfg.MaxTotalDeclaredUncompressedBytes` (guarded by the `> 0` opt-out); package doc updated from "11-rule" to "12-rule defence per BR-BOMB-001..010".
+- `services/zip-extraction/internal/extraction/describe.go` — new case "bomb-defence rule 12" → operator-friendly description. Also added the previously-missing "bomb-defence rule 11" case (overlooked during the BR-BOMB-009 commit).
+- `services/zip-extraction/internal/extraction/errors.go` — comment updated from "10 bomb-defence rules" → "12 bomb-defence rules" with explicit mention of rules 11 and 12 origins.
+- `services/zip-extraction/internal/bombdefence/checker_test.go` — `defaultCfg()` now includes `MaxTotalDeclaredUncompressedBytes: 50 GiB`; 3 new tests: `TestPreCheckRule12Rejects` (over-cap rejection + reason-text check), `TestPreCheckRule12AcceptsAtCap` (boundary at exact cap), `TestPreCheckRule12DisabledWhenZero` (cap=0 disables, allows 1 PB declared sizes to pass).
+- `services/zip-extraction/internal/config/config_test.go` — fixtures updated to include the new field; new `zero-bomb-total-declared` row in the validation-error table.
+- `services/zip-extraction/chart/values.yaml` — `bombDefence.maxTotalDeclaredUncompressedBytes: 53687091200` (50 GB) with inline rationale comment.
+- `services/zip-extraction/deploy/config-local.yaml` — same default + cross-reference to values.yaml comment.
+- `services/zip-extraction/chart/templates/configmap.yaml` — renders the new field into the in-cluster ConfigMap.
+- `aidlc-docs/construction/zip-extraction/functional-design/business-rules.md` — appended BR-BOMB-010 statement / source / trust model / verification / operational note.
+
+Verification:
+- `go vet ./...` — passes
+- `go test -count=1 -race ./...` — all 15 internal packages pass (bombdefence 1.088s, extraction 2.067s, config 1.031s)
+- `bin/helm lint chart -f chart/values.yaml` — 1 chart linted, 0 failed
+- `bin/helm template chart -f chart/values.yaml` — confirmed the new `maxTotalDeclaredUncompressedBytes:` line renders into the ConfigMap (alongside the existing big-int fields, all of which render in scientific notation through helm's text/template; the YAML parser in the service handles that — established behavior, not a regression of this change).
+
+**Context**: Defence-in-depth completion of the user's operations checklist (6 of 6 items now actively enforced). The 12-rule defence is now consistent with the docs: rules 1, 4, 12 are aggregate pre-stream (PreCheck); 5, 6, 9 are per-entry pre-stream (EntryCheck); 7, 8 are path-validation (delegated); 11 is overlap-pre-stream (OverlapCheck); 2, 3 are streaming (LimitedReader); 10 is wall-clock (orchestrator).

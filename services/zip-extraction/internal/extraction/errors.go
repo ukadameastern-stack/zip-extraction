@@ -5,8 +5,9 @@ import (
 	"fmt"
 )
 
-// BombDefenceError signals a violation of one of the 10 bomb-defence rules.
-// Rule is the FR-7 rule number (1..10); Reason is human-readable.
+// BombDefenceError signals a violation of one of the 12 bomb-defence rules.
+// Rule is the FR-7 rule number (1..12, including #11 BR-BOMB-009 overlap and
+// #12 BR-BOMB-010 total-declared-uncompressed); Reason is human-readable.
 // Per BR-BOMB-007 / BR-RETRY-009 these are NEVER retried.
 type BombDefenceError struct {
 	Rule   int

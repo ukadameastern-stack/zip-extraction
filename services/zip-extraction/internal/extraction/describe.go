@@ -57,6 +57,10 @@ func describeReason(reason string) string {
 		return "rule 9: a single entry's declared decompressed size exceeds the cap"
 	case "bomb-defence rule 10":
 		return "rule 10: extraction did not complete within the configured time limit"
+	case "bomb-defence rule 11":
+		return "rule 11: archive contains overlapping compressed-data ranges (Fifield-class non-recursive bomb)"
+	case "bomb-defence rule 12":
+		return "rule 12: sum of declared uncompressed sizes exceeds the configured cap (honestly-declared bomb)"
 
 	// Path validation (FR-6).
 	case PathReasonTraversal:

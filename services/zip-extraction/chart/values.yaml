@@ -84,6 +84,7 @@ bombDefence:
   maxDirectoryDepth:          10
   maxSingleFileSizeBytes:     262144000
   maxExtractionDurationSec:   240
+  maxTotalDeclaredUncompressedBytes: 53687091200  # 50 GB — rule #12 (BR-BOMB-010): pre-stream cap on sum of declared UncompressedSize fields. UNTRUSTED input but cheap; honestly-declared bombs get rejected before any streaming work. The trusted authoritative ceiling stays rule #2 (maxExtractedSizeBytes = 2 GB), enforced incrementally during streaming.
 
 streaming:
   maxInMemoryBufferBytes:     4194304

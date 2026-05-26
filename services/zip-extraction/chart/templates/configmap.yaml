@@ -13,6 +13,7 @@ data:
       maxDirectoryDepth:          {{ .Values.bombDefence.maxDirectoryDepth }}
       maxSingleFileSizeBytes:     {{ .Values.bombDefence.maxSingleFileSizeBytes }}
       maxExtractionDurationSec:   {{ .Values.bombDefence.maxExtractionDurationSec }}
+      maxTotalDeclaredUncompressedBytes: {{ .Values.bombDefence.maxTotalDeclaredUncompressedBytes }}
     streaming:
       maxInMemoryBufferBytes:     {{ .Values.streaming.maxInMemoryBufferBytes }}
       multipartThresholdBytes:    {{ .Values.streaming.multipartThresholdBytes }}

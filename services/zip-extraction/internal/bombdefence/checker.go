@@ -1,10 +1,14 @@
-// Package bombdefence implements the 11-rule zip-bomb defence per FR-7 +
-// BR-BOMB-001..009. PreCheck handles aggregate archive rules (#1, #4),
+// Package bombdefence implements the 12-rule zip-bomb defence per FR-7 +
+// BR-BOMB-001..010. PreCheck handles aggregate archive rules (#1, #4, #12),
 // EntryCheck handles per-entry pre-stream rules (#5, #6, #9),
 // NewLimitedReader handles streaming rules (#2, #3) with short-circuit
 // behaviour per Q5 of application design / BR-BOMB-003/004, and OverlapCheck
 // handles rule #11 (BR-BOMB-009) — overlapping compressed-data ranges that
-// produce Fifield non-recursive bombs.
+// produce Fifield non-recursive bombs. Rule #12 (BR-BOMB-010) rejects
+// archives whose summed declared uncompressed sizes exceed
+// MaxTotalDeclaredUncompressedBytes — a cheap pre-stream guard against
+// honestly-declared bombs that would otherwise only fail later via rule #2
+// (the trusted streaming limiter remains the authoritative ceiling).
 //
 // Rule #10 (extraction hard timeout) is enforced at the orchestrator level via
 // context.WithTimeout — not by this package.
@@ -30,9 +34,15 @@ type Checker struct {
 // New constructs a Checker with the given configuration.
 func New(cfg config.BombDefenceConfig) *Checker { return &Checker{cfg: cfg} }
 
-// PreCheck applies rules #1 (max compressed archive size) and #4 (max entry
-// count) using archive metadata only. Called immediately after archive/zip
-// successfully parses the central directory.
+// PreCheck applies rules #1 (max compressed archive size), #4 (max entry
+// count), and #12 (max total declared uncompressed size, BR-BOMB-010) using
+// archive metadata only. Called immediately after archive/zip successfully
+// parses the central directory.
+//
+// Rule #12 uses the UNTRUSTED declared UncompressedSize values from the
+// central directory headers — it is intentionally cheap and conservative.
+// The trusted authoritative ceiling is rule #2 (MaxExtractedSizeBytes) which
+// is enforced incrementally by the streaming limiter.
 func (c *Checker) PreCheck(meta extraction.ArchiveMetadata) error {
 	if meta.TotalCompressedBytes > c.cfg.MaxCompressedSizeBytes {
 		return &extraction.BombDefenceError{
@@ -44,6 +54,13 @@ func (c *Checker) PreCheck(meta extraction.ArchiveMetadata) error {
 		return &extraction.BombDefenceError{
 			Rule:   4,
 			Reason: formatExceededInt("entry count", meta.EntryCount, c.cfg.MaxEntryCount),
+		}
+	}
+	if c.cfg.MaxTotalDeclaredUncompressedBytes > 0 &&
+		meta.TotalDeclaredUncompressedBytes > c.cfg.MaxTotalDeclaredUncompressedBytes {
+		return &extraction.BombDefenceError{
+			Rule:   12,
+			Reason: formatExceeded("total declared uncompressed size", meta.TotalDeclaredUncompressedBytes, c.cfg.MaxTotalDeclaredUncompressedBytes),
 		}
 	}
 	return nil

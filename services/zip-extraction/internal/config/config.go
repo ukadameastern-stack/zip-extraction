@@ -51,15 +51,16 @@ type SSEConfig struct {
 	KMSKeyID string
 }
 
-// BombDefenceConfig holds the 10-rule defence thresholds (FR-7).
+// BombDefenceConfig holds the 12-rule defence thresholds (FR-7 + BR-BOMB-009/010).
 type BombDefenceConfig struct {
-	MaxCompressedSizeBytes   int64   `yaml:"maxCompressedSizeBytes"`
-	MaxExtractedSizeBytes    int64   `yaml:"maxExtractedSizeBytes"`
-	MaxCompressionRatio      float64 `yaml:"maxCompressionRatio"`
-	MaxEntryCount            int     `yaml:"maxEntryCount"`
-	MaxDirectoryDepth        int     `yaml:"maxDirectoryDepth"`
-	MaxSingleFileSizeBytes   int64   `yaml:"maxSingleFileSizeBytes"`
-	MaxExtractionDurationSec int     `yaml:"maxExtractionDurationSec"`
+	MaxCompressedSizeBytes           int64   `yaml:"maxCompressedSizeBytes"`
+	MaxExtractedSizeBytes            int64   `yaml:"maxExtractedSizeBytes"`
+	MaxCompressionRatio              float64 `yaml:"maxCompressionRatio"`
+	MaxEntryCount                    int     `yaml:"maxEntryCount"`
+	MaxDirectoryDepth                int     `yaml:"maxDirectoryDepth"`
+	MaxSingleFileSizeBytes           int64   `yaml:"maxSingleFileSizeBytes"`
+	MaxExtractionDurationSec         int     `yaml:"maxExtractionDurationSec"`
+	MaxTotalDeclaredUncompressedBytes int64  `yaml:"maxTotalDeclaredUncompressedBytes"`
 }
 
 // StreamingConfig holds streaming-I/O constants (NFR-Z-014).
@@ -177,6 +178,9 @@ func (c Config) Validate() error {
 	}
 	if c.BombDefence.MaxExtractionDurationSec <= 0 {
 		return fmt.Errorf("bombDefence.maxExtractionDurationSec: %d must be > 0", c.BombDefence.MaxExtractionDurationSec)
+	}
+	if c.BombDefence.MaxTotalDeclaredUncompressedBytes <= 0 {
+		return fmt.Errorf("bombDefence.maxTotalDeclaredUncompressedBytes: %d must be > 0", c.BombDefence.MaxTotalDeclaredUncompressedBytes)
 	}
 
 	if c.Streaming.MaxInMemoryBufferBytes <= 0 {

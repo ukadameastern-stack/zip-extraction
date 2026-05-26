@@ -19,13 +19,14 @@ import (
 
 func defaultCfg() config.BombDefenceConfig {
 	return config.BombDefenceConfig{
-		MaxCompressedSizeBytes:   500 * 1024 * 1024,
-		MaxExtractedSizeBytes:    2 * 1024 * 1024 * 1024,
-		MaxCompressionRatio:      100,
-		MaxEntryCount:            10000,
-		MaxDirectoryDepth:        10,
-		MaxSingleFileSizeBytes:   250 * 1024 * 1024,
-		MaxExtractionDurationSec: 240,
+		MaxCompressedSizeBytes:            500 * 1024 * 1024,
+		MaxExtractedSizeBytes:             2 * 1024 * 1024 * 1024,
+		MaxCompressionRatio:               100,
+		MaxEntryCount:                     10000,
+		MaxDirectoryDepth:                 10,
+		MaxSingleFileSizeBytes:            250 * 1024 * 1024,
+		MaxExtractionDurationSec:          240,
+		MaxTotalDeclaredUncompressedBytes: 50 * 1024 * 1024 * 1024, // 50 GB
 	}
 }
 
@@ -52,6 +53,48 @@ func TestPreCheckRule4Rejects(t *testing.T) {
 	require.Error(t, err)
 	bde, _ := extraction.IsBombDefence(err)
 	assert.Equal(t, 4, bde.Rule)
+}
+
+// BR-BOMB-010 — rule #12: sum-of-declared-uncompressed cap fires for honestly-
+// declared bombs. Untrusted input, but cheap to reject pre-stream.
+func TestPreCheckRule12Rejects(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.MaxTotalDeclaredUncompressedBytes = 1024
+	c := bombdefence.New(cfg)
+	err := c.PreCheck(extraction.ArchiveMetadata{
+		EntryCount:                     1,
+		TotalCompressedBytes:           100,
+		TotalDeclaredUncompressedBytes: 2048,
+	})
+	require.Error(t, err)
+	bde, _ := extraction.IsBombDefence(err)
+	assert.Equal(t, 12, bde.Rule)
+	assert.Contains(t, bde.Reason, "total declared uncompressed size")
+}
+
+// Rule #12 accepts archives exactly at the cap (boundary inclusive).
+func TestPreCheckRule12AcceptsAtCap(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.MaxTotalDeclaredUncompressedBytes = 1024
+	c := bombdefence.New(cfg)
+	require.NoError(t, c.PreCheck(extraction.ArchiveMetadata{
+		EntryCount:                     1,
+		TotalCompressedBytes:           100,
+		TotalDeclaredUncompressedBytes: 1024,
+	}))
+}
+
+// Rule #12 is disabled (skipped) when the cap is 0. Defensive: lets operators
+// opt out without breaking the pre-check flow.
+func TestPreCheckRule12DisabledWhenZero(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.MaxTotalDeclaredUncompressedBytes = 0
+	c := bombdefence.New(cfg)
+	require.NoError(t, c.PreCheck(extraction.ArchiveMetadata{
+		EntryCount:                     1,
+		TotalCompressedBytes:           100,
+		TotalDeclaredUncompressedBytes: 1 << 50, // 1 PB — astronomically over, but cap is off
+	}))
 }
 
 // BR-BOMB-003 — strong invariant: bytes returned by LimitedReader ≤ cap.
