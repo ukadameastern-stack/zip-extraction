@@ -59,6 +59,19 @@ type ArchiveMetadata struct {
 	Encrypted                      bool
 	MultiDisk                      bool
 	HasDeflate64Entries            bool
+	// EntryDataRanges holds each entry's compressed-data byte interval
+	// [Start, End) in the archive. Populated by openZip and consumed by
+	// bombdefence.OverlapCheck (BR-BOMB-009, FR-7 rule #11) to detect Fifield
+	// non-recursive bombs that reuse the same compressed bytes across multiple
+	// central-directory records.
+	EntryDataRanges []EntryDataRange
+}
+
+// EntryDataRange is one entry's compressed-data byte interval in the archive.
+type EntryDataRange struct {
+	EntryIndex int   // 0-based index into zip.Reader.File (used in error messages)
+	Start      int64 // inclusive
+	End        int64 // exclusive
 }
 
 // EntryInfo is the subset of *zip.File the bombdefence + validation packages

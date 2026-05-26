@@ -219,3 +219,63 @@ func TestEntryCheckRule9_SingleFileSize(t *testing.T) {
 	bde, _ := extraction.IsBombDefence(err)
 	assert.Equal(t, 9, bde.Rule)
 }
+
+// BR-BOMB-009 — rule #11: overlapping compressed-data ranges fire.
+// Fifield non-recursive bomb pattern: two central-directory records point to
+// the same compressed bytes [100, 200), so one decoded stream is "extracted"
+// twice and total extracted size doubles without per-entry ratio anomaly.
+func TestOverlapCheckRule11_Rejects(t *testing.T) {
+	c := bombdefence.New(defaultCfg())
+	err := c.OverlapCheck(extraction.ArchiveMetadata{
+		EntryCount: 2,
+		EntryDataRanges: []extraction.EntryDataRange{
+			{EntryIndex: 0, Start: 100, End: 200},
+			{EntryIndex: 1, Start: 150, End: 250}, // overlaps entry 0
+		},
+	})
+	require.Error(t, err)
+	bde, ok := extraction.IsBombDefence(err)
+	require.True(t, ok)
+	assert.Equal(t, 11, bde.Rule)
+	assert.Contains(t, bde.Reason, "overlapping")
+}
+
+// BR-BOMB-009 — non-overlapping ranges (even when adjacent at the boundary) pass.
+func TestOverlapCheckRule11_AdjacentOK(t *testing.T) {
+	c := bombdefence.New(defaultCfg())
+	err := c.OverlapCheck(extraction.ArchiveMetadata{
+		EntryCount: 3,
+		EntryDataRanges: []extraction.EntryDataRange{
+			{EntryIndex: 0, Start: 100, End: 200},
+			{EntryIndex: 1, Start: 200, End: 300}, // touches but does not overlap
+			{EntryIndex: 2, Start: 350, End: 450},
+		},
+	})
+	assert.NoError(t, err)
+}
+
+// BR-BOMB-009 — checker is order-invariant: it sorts the input copy.
+func TestOverlapCheckRule11_SortsBeforeWalking(t *testing.T) {
+	c := bombdefence.New(defaultCfg())
+	// Same overlapping pair, presented out of order.
+	err := c.OverlapCheck(extraction.ArchiveMetadata{
+		EntryCount: 2,
+		EntryDataRanges: []extraction.EntryDataRange{
+			{EntryIndex: 1, Start: 150, End: 250},
+			{EntryIndex: 0, Start: 100, End: 200},
+		},
+	})
+	require.Error(t, err)
+	bde, _ := extraction.IsBombDefence(err)
+	assert.Equal(t, 11, bde.Rule)
+}
+
+// Single entry trivially passes; empty too. Avoids n-1 underflow.
+func TestOverlapCheckRule11_FewerThanTwoEntries(t *testing.T) {
+	c := bombdefence.New(defaultCfg())
+	assert.NoError(t, c.OverlapCheck(extraction.ArchiveMetadata{EntryCount: 0}))
+	assert.NoError(t, c.OverlapCheck(extraction.ArchiveMetadata{
+		EntryCount:      1,
+		EntryDataRanges: []extraction.EntryDataRange{{EntryIndex: 0, Start: 30, End: 130}},
+	}))
+}

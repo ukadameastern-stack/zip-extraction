@@ -72,6 +72,12 @@ This document enumerates the business rules that govern every algorithmic decisi
 **Source**: Q8 of functional design, FR-7.1
 **Verification**: Integration test on bomb-violation message lifecycle
 
+### BR-BOMB-009 — Overlapping compressed-data ranges (rule #11, Fifield defence)
+**Statement**: After `archive/zip.NewReader` succeeds and before iterating entries, the service calls `bombdefence.OverlapCheck` which collects each entry's compressed-data byte interval `[DataOffset, DataOffset + CompressedSize64)`, sorts by offset, and verifies that consecutive intervals do not overlap. A violation aborts the archive with `*BombDefenceError{Rule: 11}` BEFORE any decompression. Defends against the Fifield non-recursive bomb pattern: multiple central-directory records sharing the same compressed-data range so a single deflate stream gets decompressed multiple times under different "entry" identities, multiplying extracted size without a per-entry compression-ratio anomaly (so rule #3 alone cannot catch it; rule #2 catches the cumulative symptom but not the mechanism).
+**Source**: FR-7 rule #11; defence-in-depth response to the academic "ZIP files: history, explanation, and implementation" Fifield-style construction.
+**Verification**: Unit tests `TestOverlapCheckRule11_Rejects` (overlap detected), `TestOverlapCheckRule11_AdjacentOK` (boundary touch passes), `TestOverlapCheckRule11_SortsBeforeWalking` (order-invariant), `TestOverlapCheckRule11_FewerThanTwoEntries` (degenerate inputs safe).
+**Operational note**: Tolerates `*zip.File.DataOffset()` errors on individual entries — surviving ranges are still pairwise-checked. A whole-archive DataOffset failure means zero ranges survive and OverlapCheck trivially passes; rule #1 / rule #2 still catch the resource-exhaustion symptom downstream.
+
 ---
 
 ## BR-PATH: Path Validation

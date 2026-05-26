@@ -1,8 +1,10 @@
-// Package bombdefence implements the 10-rule zip-bomb defence per FR-7 +
-// BR-BOMB-001..008. PreCheck handles aggregate archive rules (#1, #4),
-// EntryCheck handles per-entry pre-stream rules (#5, #6, #9), and
+// Package bombdefence implements the 11-rule zip-bomb defence per FR-7 +
+// BR-BOMB-001..009. PreCheck handles aggregate archive rules (#1, #4),
+// EntryCheck handles per-entry pre-stream rules (#5, #6, #9),
 // NewLimitedReader handles streaming rules (#2, #3) with short-circuit
-// behaviour per Q5 of application design / BR-BOMB-003/004.
+// behaviour per Q5 of application design / BR-BOMB-003/004, and OverlapCheck
+// handles rule #11 (BR-BOMB-009) — overlapping compressed-data ranges that
+// produce Fifield non-recursive bombs.
 //
 // Rule #10 (extraction hard timeout) is enforced at the orchestrator level via
 // context.WithTimeout — not by this package.
@@ -11,8 +13,10 @@
 package bombdefence
 
 import (
+	"fmt"
 	"io"
 	"os"
+	"sort"
 
 	"github.com/org-placeholder/doc-uploader/services/zip-extraction/internal/config"
 	"github.com/org-placeholder/doc-uploader/services/zip-extraction/internal/extraction"
@@ -67,6 +71,45 @@ func (c *Checker) EntryCheck(idx int, e extraction.EntryInfo) error {
 		return &extraction.BombDefenceError{
 			Rule:   9,
 			Reason: formatExceeded("single-file size", e.UncompressedSize, c.cfg.MaxSingleFileSizeBytes),
+		}
+	}
+	return nil
+}
+
+// OverlapCheck applies rule #11 (BR-BOMB-009): no two entries' compressed-data
+// byte intervals may overlap within the archive. Defends against Fifield
+// non-recursive bombs that point multiple central-directory records at the
+// same compressed bytes, so each "entry" decompresses the same stream and the
+// total extracted size multiplies without an obvious per-entry compression
+// ratio signature.
+//
+// Algorithm: sort the entry data-ranges by Start, then walk linearly. Each
+// entry's Start must be ≥ the previous entry's End. O(n log n) time, O(1)
+// extra space (the sort is in-place on a fresh slice copy).
+//
+// Tolerates archives where DataOffset() failed for some entries — those are
+// simply absent from the slice; surviving ranges are still checked.
+func (c *Checker) OverlapCheck(meta extraction.ArchiveMetadata) error {
+	ranges := meta.EntryDataRanges
+	if len(ranges) < 2 {
+		return nil
+	}
+	// Copy to avoid mutating caller's slice ordering.
+	sorted := make([]extraction.EntryDataRange, len(ranges))
+	copy(sorted, ranges)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Start < sorted[j].Start })
+
+	for i := 1; i < len(sorted); i++ {
+		prev, cur := sorted[i-1], sorted[i]
+		if cur.Start < prev.End {
+			return &extraction.BombDefenceError{
+				Rule: 11,
+				Reason: fmt.Sprintf(
+					"overlapping compressed data: entry %d [%d,%d) overlaps entry %d [%d,%d)",
+					prev.EntryIndex, prev.Start, prev.End,
+					cur.EntryIndex, cur.Start, cur.End,
+				),
+			}
 		}
 	}
 	return nil

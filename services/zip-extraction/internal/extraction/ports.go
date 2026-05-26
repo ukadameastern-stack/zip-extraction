@@ -33,9 +33,10 @@ type SlipsheetWriter interface {
 	Write(ctx context.Context, execID, sourceArchive string, status Status, entries []EntryOutcome, reason, detail string) error
 }
 
-// BombChecker is the port for the 10-rule defence + LimitedReader factory.
+// BombChecker is the port for the 11-rule defence + LimitedReader factory.
 type BombChecker interface {
 	PreCheck(meta ArchiveMetadata) error
+	OverlapCheck(meta ArchiveMetadata) error
 	EntryCheck(idx int, entry EntryInfo) error
 	NewLimitedReader(r io.Reader, compressedSize int64) io.Reader
 }

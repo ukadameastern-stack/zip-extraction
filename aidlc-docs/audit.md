@@ -1125,3 +1125,28 @@ Chart resource sizes — current state (changed for harness; unchanged for main 
 | zip-extraction-harness | 50m  | 128Mi (was 64Mi) | 512Mi (was 128Mi) |
 
 **Context**: Post-AI-DLC operations work; documented in audit.md per CLAUDE.md mandate. The AI-DLC workflow itself remains terminal at the OPERATIONS placeholder — this entry is the "future expansion" the placeholder anticipated.
+
+---
+
+## Post-deployment — Add BR-BOMB-009 (rule #11) overlapping compressed-data check
+**Timestamp**: 2026-05-25T12:30:00Z
+**User Input**: Checklist of 6 defence items; asked to confirm coverage and "add the overlap-scan rule" after verification found 5/6 implemented (overlapping entries / Fifield non-recursive bomb defence was the gap).
+**AI Response**: Added BR-BOMB-009 (rule #11) — overlap detection via sort-by-offset + linear scan of compressed-data intervals. Inserted between `archive/zip.NewReader` and entry iteration. Defends against Fifield-style bombs where central-directory records point at the same compressed bytes, so the same deflate stream decompresses multiple times without a per-entry compression-ratio anomaly. Rule #2 (cumulative extracted) catches the symptom; rule #11 catches the mechanism.
+
+Changed files:
+- `services/zip-extraction/internal/extraction/types.go` — `ArchiveMetadata.EntryDataRanges []EntryDataRange` field; new `EntryDataRange{EntryIndex, Start, End}` type.
+- `services/zip-extraction/internal/extraction/zip_open.go` — populates `EntryDataRanges` via `*zip.File.DataOffset()` + `CompressedSize64`. Tolerates per-entry DataOffset errors (those entries are simply omitted from the slice; surviving ranges still get checked).
+- `services/zip-extraction/internal/extraction/ports.go` — `BombChecker` interface gains `OverlapCheck(meta) error`.
+- `services/zip-extraction/internal/bombdefence/checker.go` — new `OverlapCheck` method; package-doc updated to "11-rule defence per BR-BOMB-001..009"; imports `fmt`, `sort`.
+- `services/zip-extraction/internal/extraction/service.go` — calls `OverlapCheck` immediately after `PreCheck`; both errors flow through the same `*BombDefenceError` branch.
+- `services/zip-extraction/internal/extraction/service_process_test.go` — `fakeBomb` test double gains `OverlapCheck(meta) error` method + corresponding field.
+- `services/zip-extraction/internal/bombdefence/checker_test.go` — 4 new tests: `TestOverlapCheckRule11_{Rejects,AdjacentOK,SortsBeforeWalking,FewerThanTwoEntries}`.
+- `aidlc-docs/construction/zip-extraction/functional-design/business-rules.md` — appended BR-BOMB-009 statement / source / verification / operational note.
+
+Verification:
+- `go build ./...` — passes
+- `go vet ./...` — passes
+- `go test -count=1 -race ./...` — all 15 internal packages pass (bombdefence 1.069s, extraction 2.131s)
+- Boundary cases covered: adjacent intervals (`prev.End == cur.Start`) pass; out-of-order input still detected (the checker sorts before walking); degenerate inputs (0 or 1 entries) trivially pass.
+
+**Context**: Defence-in-depth; closes the 6-of-6 gap surfaced during operations review against the user-supplied Fifield-class checklist.

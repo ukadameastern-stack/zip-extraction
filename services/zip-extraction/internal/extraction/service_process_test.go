@@ -115,13 +115,15 @@ func (f *fakeSlipsheetWriter) Write(ctx context.Context, execID, source string, 
 
 // fakeBomb passes all rules and produces a pass-through LimitedReader.
 type fakeBomb struct {
-	preErr   error
-	entryErr error
-	limit    int64 // if > 0, LimitedReader returns rule-2 error after this many bytes
+	preErr     error
+	overlapErr error
+	entryErr   error
+	limit      int64 // if > 0, LimitedReader returns rule-2 error after this many bytes
 }
 
-func (f *fakeBomb) PreCheck(meta extraction.ArchiveMetadata) error { return f.preErr }
-func (f *fakeBomb) EntryCheck(idx int, e extraction.EntryInfo) error { return f.entryErr }
+func (f *fakeBomb) PreCheck(meta extraction.ArchiveMetadata) error     { return f.preErr }
+func (f *fakeBomb) OverlapCheck(meta extraction.ArchiveMetadata) error { return f.overlapErr }
+func (f *fakeBomb) EntryCheck(idx int, e extraction.EntryInfo) error   { return f.entryErr }
 func (f *fakeBomb) NewLimitedReader(r io.Reader, compressedSize int64) io.Reader {
 	if f.limit <= 0 {
 		return r

@@ -33,9 +33,12 @@ func openZip(path string, size int64) (*zip.Reader, ArchiveMetadata, error) {
 		return nil, ArchiveMetadata{}, fmt.Errorf("parseZip: %w", err)
 	}
 
-	meta := ArchiveMetadata{EntryCount: len(zr.File)}
+	meta := ArchiveMetadata{
+		EntryCount:      len(zr.File),
+		EntryDataRanges: make([]EntryDataRange, 0, len(zr.File)),
+	}
 	const deflate64 = 9
-	for _, fh := range zr.File {
+	for i, fh := range zr.File {
 		meta.TotalCompressedBytes += int64(fh.CompressedSize64)
 		// math.MaxUint32 is the ZIP32 → ZIP64 transition marker for files in the
 		// central directory; we don't reject ZIP64 (per FR-3.6 it's supported).
@@ -50,6 +53,18 @@ func openZip(path string, size int64) (*zip.Reader, ArchiveMetadata, error) {
 		}
 		if fh.Method == deflate64 {
 			meta.HasDeflate64Entries = true
+		}
+		// Compressed-data interval for BR-BOMB-009 overlap detection. DataOffset
+		// resolves the local-file-header + filename + extra, giving the actual
+		// compressed-bytes start. Best-effort: a DataOffset error (rare — implies
+		// a malformed local header) just skips this entry's range; the rest still
+		// get checked.
+		if dataOff, derr := fh.DataOffset(); derr == nil {
+			meta.EntryDataRanges = append(meta.EntryDataRanges, EntryDataRange{
+				EntryIndex: i,
+				Start:      dataOff,
+				End:        dataOff + int64(fh.CompressedSize64),
+			})
 		}
 	}
 

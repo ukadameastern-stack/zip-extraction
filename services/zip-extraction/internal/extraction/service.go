@@ -107,8 +107,14 @@ func (s *Service) Process(ctx context.Context, msg ClaimCheck) (Outcome, error) 
 		return Outcome{Status: archiveStatus, Reason: archiveReason, DurationMs: ms(start, s.deps.Clock)}, nil
 	}
 
-	// 4. Pre-check (BR-BOMB-001: rules #1, #4).
-	if err := s.deps.BombChecker.PreCheck(zMeta); err != nil {
+	// 4a. Pre-check (BR-BOMB-001: rules #1, #4).
+	// 4b. Overlap-check (BR-BOMB-009: rule #11 — Fifield non-recursive bombs).
+	//     Both produce *BombDefenceError; we handle them with the same branch.
+	preErr := s.deps.BombChecker.PreCheck(zMeta)
+	if preErr == nil {
+		preErr = s.deps.BombChecker.OverlapCheck(zMeta)
+	}
+	if err := preErr; err != nil {
 		archiveStatus = StatusFailed
 		if bde, ok := IsBombDefence(err); ok {
 			archiveReason = fmt.Sprintf("bomb-defence rule %d", bde.Rule)
