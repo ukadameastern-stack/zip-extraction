@@ -77,7 +77,7 @@ logging:
   level: info
 
 bombDefence:
-  maxCompressedSizeBytes:     524288000
+  maxCompressedSizeBytes:     5368709120  # 5 GB (raised 2026-05-25 from 500 MB). NOTE: rule 2 (maxExtractedSizeBytes) is now the binding constraint at 2 GB — anything that decompresses above 2 GB will trip rule 2 before reaching the 5 GB compressed cap. Raise rule 2 / 9 / 10 in lockstep if you want to actually accept multi-GB extracted output.
   maxExtractedSizeBytes:      2147483648
   maxCompressionRatio:        1000     # bumped from 100: legacy Office docs (.doc OLE2) commonly compress 100-300x; real bombs are 1000x+
   maxEntryCount:              10000

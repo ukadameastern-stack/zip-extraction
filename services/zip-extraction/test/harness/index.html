@@ -52,6 +52,10 @@
     .stat .d { color: var(--warn); margin-left: 4px; }
     .stat .v { color: var(--accent); }
     .full { grid-column: 1 / -1; }
+    .progress-bar { width: 100%; height: 8px; background: var(--panel2); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.15s ease-out; }
+    .progress-fill.indeterminate { background: linear-gradient(90deg, var(--panel2) 0%, var(--accent) 50%, var(--panel2) 100%); width: 100%; animation: pbar-indet 1.2s linear infinite; }
+    @keyframes pbar-indet { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
     .queue-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
     .qbox { background: var(--panel2); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
     .qbox .label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
@@ -129,8 +133,9 @@
     <section id="config-panel">
       <h2>Submit</h2>
       <div class="row">
-        <label>archive (.zip)</label>
+        <label>archive (.zip) <span id="max-archive-hint" class="muted" style="font-size: 11px; margin-left: 4px;">(env limit: …)</span></label>
         <input type="file" id="file" accept=".zip,application/zip">
+        <div id="max-archive-warn" class="muted" style="display:none; font-size: 11px; color: var(--warn); margin-top: 4px;"></div>
       </div>
       <div class="row">
         <label>pipelineExecutionId</label>
@@ -149,6 +154,10 @@
       <div class="row" style="margin-top: 14px;">
         <button id="submit">Send to SQS</button>
         <span id="submit-status" class="muted" style="margin-left: 10px;"></span>
+      </div>
+      <div id="upload-progress" class="row" style="display: none; margin-top: 8px;">
+        <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+        <div id="progress-text" class="mono" style="font-size: 11px; margin-top: 4px; color: var(--muted);"></div>
       </div>
 
       <h2 style="margin-top: 24px;">LocalStack target</h2>
@@ -207,21 +216,42 @@ function humanSize(n) {
 let pollTimer = null;
 let metricsBaseline = null;
 
+let maxArchiveBytes = 0;
+
 async function loadConfig() {
   try {
     const cfg = await fetch("/api/config").then(r => r.json());
+    maxArchiveBytes = cfg.maxArchiveBytes || 0;
+    $("max-archive-hint").textContent = "(env limit: " + (maxArchiveBytes ? humanSize(maxArchiveBytes) : "unset") + ")";
     $("cfg-lines").innerHTML = [
-      `<div class="config-line">endpoint: <code>${cfg.endpointUrl}</code></div>`,
+      `<div class="config-line">endpoint: <code>${cfg.endpointUrl || "(default AWS)"}</code></div>`,
       `<div class="config-line">region: <code>${cfg.region}</code></div>`,
       `<div class="config-line">source bucket: <code>${cfg.sourceBucket}</code></div>`,
       `<div class="config-line">staging bucket: <code>${cfg.stagingBucket}</code></div>`,
       `<div class="config-line">queue: <code>${cfg.queueUrl}</code></div>`,
       `<div class="config-line">ddb table: <code>${cfg.dynamoTable}</code></div>`,
+      `<div class="config-line">max archive: <code>${maxArchiveBytes ? humanSize(maxArchiveBytes) : "unset"}</code></div>`,
     ].join("");
   } catch (e) {
     $("cfg-lines").textContent = "(config not reachable)";
   }
 }
+
+// Live client-side warning when the picked file exceeds the env's archive cap.
+// Pure hint — the actual rejection happens on the service side at PreCheck.
+document.addEventListener("change", (ev) => {
+  if (ev.target && ev.target.id === "file") {
+    const f = ev.target.files[0];
+    const w = $("max-archive-warn");
+    if (!f || !maxArchiveBytes) { w.style.display = "none"; return; }
+    if (f.size > maxArchiveBytes) {
+      w.textContent = `⚠ file is ${humanSize(f.size)} — exceeds env limit ${humanSize(maxArchiveBytes)}. Service will reject (rule 1).`;
+      w.style.display = "block";
+    } else {
+      w.style.display = "none";
+    }
+  }
+});
 
 function setBadge(status) {
   const el = $("status-badge");
@@ -315,26 +345,63 @@ $("submit").addEventListener("click", async () => {
   $("submit-status").textContent = "uploading…";
   setBadge("pending");
 
+  // Reset + show progress bar.
+  $("upload-progress").style.display = "block";
+  $("progress-fill").classList.remove("indeterminate");
+  $("progress-fill").style.width = "0%";
+  $("progress-text").textContent = "0% · 0 B / " + humanSize(file.size);
+
   const fd = new FormData();
   fd.append("archive", file);
   if ($("execId").value.trim()) fd.append("pipelineExecutionId", $("execId").value.trim());
   if ($("tenantId").value.trim()) fd.append("tenantId", $("tenantId").value.trim());
   if ($("documentId").value.trim()) fd.append("documentId", $("documentId").value.trim());
 
-  let resp;
+  // XHR for upload-progress visibility — fetch doesn't expose upload bytes-sent.
+  // Phases the bar tracks:
+  //   1. 0–100% determinate: browser → harness backend (POST /api/submit body)
+  //   2. 100% indeterminate: harness backend → S3 PutObject + SQS SendMessage
+  //   3. hidden once /api/submit returns; result-polling takes over
+  let data;
   try {
-    resp = await fetch("/api/submit", { method: "POST", body: fd });
-    if (!resp.ok) {
-      const t = await resp.text();
-      throw new Error(`${resp.status}: ${t}`);
-    }
+    data = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/submit");
+      xhr.upload.addEventListener("progress", (ev) => {
+        if (ev.lengthComputable) {
+          const pct = (ev.loaded / ev.total) * 100;
+          $("progress-fill").style.width = pct.toFixed(1) + "%";
+          $("progress-text").textContent =
+            pct.toFixed(1) + "% · " + humanSize(ev.loaded) + " / " + humanSize(ev.total);
+        }
+      });
+      xhr.upload.addEventListener("load", () => {
+        // Body fully sent to the harness backend; the harness is now doing the
+        // S3 PutObject + SQS SendMessage on the upstream side. Show indeterminate.
+        $("progress-fill").classList.add("indeterminate");
+        $("progress-text").textContent = "uploaded to harness · waiting for S3 PutObject + SQS SendMessage…";
+      });
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try { resolve(JSON.parse(xhr.responseText)); }
+          catch (e) { reject(new Error("invalid JSON response: " + e.message)); }
+        } else {
+          reject(new Error(xhr.status + ": " + xhr.responseText));
+        }
+      });
+      xhr.addEventListener("error", () => reject(new Error("network error")));
+      xhr.addEventListener("abort", () => reject(new Error("aborted")));
+      xhr.send(fd);
+    });
   } catch (e) {
     $("submit-status").textContent = "submit failed: " + e.message;
     $("submit").disabled = false;
+    $("upload-progress").style.display = "none";
     return;
   }
-
-  const data = await resp.json();
+  // Hide the bar — result polling takes over from here.
+  $("upload-progress").style.display = "none";
+  $("progress-fill").classList.remove("indeterminate");
   $("submit").disabled = false;
   $("submit-status").textContent = "submitted; polling result…";
   $("result-hint").style.display = "none";

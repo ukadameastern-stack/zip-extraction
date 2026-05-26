@@ -40,6 +40,7 @@ spec:
             - "-staging-bucket={{ .Values.infra.stagingBucket }}"
             - "-dynamo-table={{ .Values.infra.dynamoTable }}"
             - "-service-metrics-url=http://{{ include "zip-extraction.fullname" . }}:{{ .Values.service.port }}/metrics"
+            - "-max-archive-bytes={{ .Values.bombDefence.maxCompressedSizeBytes }}"
           ports:
             - name: http
               containerPort: 9000

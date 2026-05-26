@@ -39,15 +39,16 @@ import (
 var indexHTML []byte
 
 type config struct {
-	listenAddr      string
-	endpointURL     string
-	region          string
-	queueURL        string
-	dlqURL          string
-	sourceBucket    string
-	stagingBucket   string
-	dynamoTable     string
+	listenAddr        string
+	endpointURL       string
+	region            string
+	queueURL          string
+	dlqURL            string
+	sourceBucket      string
+	stagingBucket     string
+	dynamoTable       string
 	serviceMetricsURL string
+	maxArchiveBytes   int64 // mirrors service bombDefence.maxCompressedSizeBytes — surfaced in UI only
 }
 
 func main() {
@@ -61,6 +62,7 @@ func main() {
 	flag.StringVar(&c.stagingBucket, "staging-bucket", "doc-uploader-staging-local", "S3 staging bucket")
 	flag.StringVar(&c.dynamoTable, "dynamo-table", "pipeline_files", "DynamoDB table")
 	flag.StringVar(&c.serviceMetricsURL, "service-metrics-url", "http://localhost:8080/metrics", "zip-extraction service /metrics endpoint")
+	flag.Int64Var(&c.maxArchiveBytes, "max-archive-bytes", 5368709120, "max source ZIP size accepted by the service in this environment (mirrors bombDefence.maxCompressedSizeBytes; default 5 GiB matches chart/values.yaml). Surfaced in the Submit form as a hint; the service enforces the actual limit.")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -113,6 +115,7 @@ func main() {
 	log.Printf("  dlq:             %s", c.dlqURL)
 	log.Printf("  dynamodb table:  %s", c.dynamoTable)
 	log.Printf("  service metrics: %s", c.serviceMetricsURL)
+	log.Printf("  max archive:     %d bytes (UI hint only — service enforces)", c.maxArchiveBytes)
 	if err := http.ListenAndServe(c.listenAddr, mux); err != nil {
 		log.Fatal(err)
 	}
@@ -146,13 +149,14 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	resp := map[string]string{
-		"endpointUrl":   s.cfg.endpointURL,
-		"region":        s.cfg.region,
-		"queueUrl":      s.cfg.queueURL,
-		"sourceBucket":  s.cfg.sourceBucket,
-		"stagingBucket": s.cfg.stagingBucket,
-		"dynamoTable":   s.cfg.dynamoTable,
+	resp := map[string]interface{}{
+		"endpointUrl":     s.cfg.endpointURL,
+		"region":          s.cfg.region,
+		"queueUrl":        s.cfg.queueURL,
+		"sourceBucket":    s.cfg.sourceBucket,
+		"stagingBucket":   s.cfg.stagingBucket,
+		"dynamoTable":     s.cfg.dynamoTable,
+		"maxArchiveBytes": s.cfg.maxArchiveBytes,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

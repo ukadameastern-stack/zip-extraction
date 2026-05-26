@@ -3,7 +3,7 @@
 # Loaded by internal/config.Load() at CONFIG_PATH=/etc/zip-extraction/config.yaml.
 
 bombDefence:
-  maxCompressedSizeBytes:     524288000    # 500 MB
+  maxCompressedSizeBytes:     5368709120   # 5 GB (raised 2026-05-25; see chart/values.yaml comment for cascading binding-constraint notes on rules 2/9/10)
   maxExtractedSizeBytes:      2147483648   # 2 GB
   maxCompressionRatio:        1000
   maxEntryCount:              10000

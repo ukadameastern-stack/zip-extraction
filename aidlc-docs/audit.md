@@ -1150,3 +1150,39 @@ Verification:
 - Boundary cases covered: adjacent intervals (`prev.End == cur.Start`) pass; out-of-order input still detected (the checker sorts before walking); degenerate inputs (0 or 1 entries) trivially pass.
 
 **Context**: Defence-in-depth; closes the 6-of-6 gap surfaced during operations review against the user-supplied Fifield-class checklist.
+
+---
+
+## Post-deployment — Raise compressed-archive cap 500 MB → 5 GB + harness upload UX
+**Timestamp**: 2026-05-25T20:30:00Z
+**User Input**: Test runs through the DEV05 harness routinely needed archives larger than 500 MB (the original `bombDefence.maxCompressedSizeBytes` ceiling) and the UI gave no client-side feedback about either upload progress or the env's accepted size before users wasted a multi-minute upload.
+**AI Response**: Two coupled changes, treated as one logical unit because the harness UX is only meaningful if the service actually accepts the larger archives.
+
+1. **Raise compressed-archive cap 500 MB → 5 GB** (rule 1, `bombDefence.maxCompressedSizeBytes`):
+    - `services/zip-extraction/chart/values.yaml`: 524288000 (500 MB) → 5368709120 (5 GB). Inline comment added pointing out the binding-constraint shift: rule 2 (`maxExtractedSizeBytes` = 2 GB) is now the operative ceiling for anything decompressing past 2 GB; rule 1 only binds on weirdly low-ratio archives. Operators wanting to actually accept multi-GB extracted output must raise rules 2 / 9 / 10 in lockstep.
+    - `services/zip-extraction/deploy/config-local.yaml`: same raise, with comment cross-referencing the values.yaml note.
+    - Per-env overlays (`values-sandbox.yaml` / `values-staging.yaml` / `values-prod.yaml`) deliberately NOT touched — they inherit the new chart default. Operators who want to pin a lower cap per-env can override there.
+
+2. **Harness upload UX** — make the env-limit visible client-side and show real upload progress:
+    - `services/zip-extraction/test/harness/main.go`: new `-max-archive-bytes` flag (int64, default 5368709120 = matches chart default). Added to `config` struct + surfaced via `/api/config` JSON response (`maxArchiveBytes` field).
+    - `services/zip-extraction/chart/templates/harness-deployment.yaml`: wires `-max-archive-bytes={{ .Values.bombDefence.maxCompressedSizeBytes }}` into the harness pod args so the UI hint always tracks the live service config (single source of truth: `bombDefence.maxCompressedSizeBytes`).
+    - `services/zip-extraction/test/harness/index.html`:
+        - `loadConfig()` reads `cfg.maxArchiveBytes`, populates a header hint next to the file picker (`(env limit: 5.0 GB)`) AND adds it to the LocalStack-target panel.
+        - File-picker `change` listener: if picked file exceeds the env cap, show an inline orange warning ("⚠ file is X — exceeds env limit Y. Service will reject (rule 1).") — pure UX hint; the service is the authoritative gate.
+        - Submit handler reworked from `fetch()` to `XMLHttpRequest` because `fetch()` doesn't expose upload-byte-sent events. Two-phase progress bar:
+            1. **Determinate** 0–100% during `xhr.upload.progress` (browser → harness backend bytes-sent).
+            2. **Indeterminate** sweep after `xhr.upload.load` fires (harness backend → S3 PutObject + SQS SendMessage; bytes-sent ≠ work-done).
+            3. Hidden once `/api/submit` returns; result polling takes over.
+        - Resilience: progress bar is hidden + state reset on every failure path (error, abort, non-2xx response, invalid JSON).
+        - Endpoint display: `cfg.endpointUrl` falls back to `"(default AWS)"` when empty (real-AWS deploy doesn't set it).
+
+Verification:
+- `go build ./...` — passes
+- `go vet ./...` — passes
+- `go test -count=1 -race ./...` — all 15 internal packages pass (harness has no test package; nothing to regress there)
+- Visual: progress bar tested end-to-end against the harness backend on local LocalStack; determinate phase reaches 100% in line with browser-measured bytes, indeterminate sweep visible while the harness does the upstream S3 PutObject, bar hides cleanly when `/api/submit` returns.
+
+Operational implications:
+- Helm chart users picking up this change get the new 5 GB default automatically. **Backwards-compat note**: if an operator was relying on the implicit 500 MB ceiling as a DoS guard, they need to add an explicit override to their per-env values file. The other absolute caps (rule 2 = 2 GB extracted, rule 9 = 250 MB per file, rule 10 = 240 s wall-clock) remain unchanged and are the more meaningful ceilings against actual resource-exhaustion bombs.
+
+**Context**: Post-AI-DLC operations work; coupled service-config + harness UX change. The harness UX is the user-visible piece; the cap raise is the underlying capability that makes the new UX worth shipping.
