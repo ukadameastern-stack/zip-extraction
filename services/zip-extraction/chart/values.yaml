@@ -72,6 +72,15 @@ sse:
   mode: "SSE-S3"           # "SSE-S3" | "SSE-KMS"
   kmsKeyId: ""             # populated only when mode == "SSE-KMS"
 
+# Optional per-child classification hop. Empty `url` disables the call
+# (default behaviour); when set, after each child is uploaded to staging the
+# service POSTs it to `<url>/api/classify` and stamps the result on the
+# slipsheet's children[] entry. Best-effort — failures never block extraction.
+classification:
+  url: ""                  # e.g. http://classification-ui.classification-service-sandbox on DEV05
+  timeoutSec: 30
+  defaultWorkspace: ""     # fallback workspaceId when ClaimCheck.tenantId is empty
+
 logging:
   format: json             # "json" | "console"
   level: info

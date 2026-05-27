@@ -344,7 +344,64 @@ func (s *Service) processEntry(
 	}
 
 	s.deps.Metrics.BytesExtracted(entry.UncompressedSize)
+
+	// Optional classification hop. Best-effort: failure is logged + metric but
+	// does not affect the entry's UPLOADED status or the parent archive outcome.
+	if s.deps.Classifier != nil {
+		s.classifyChild(ctx, msg, &out, logger)
+	}
+
 	return out, false, "", ""
+}
+
+// classifyChild streams the child back from staging and POSTs it to the
+// classifier. The result is stamped onto out.Classification on success;
+// errors are logged and counted but never propagated.
+func (s *Service) classifyChild(ctx context.Context, msg ClaimCheck, out *EntryOutcome, logger Logger) {
+	workspaceID := msg.TenantID
+	if workspaceID == "" {
+		workspaceID = s.deps.Config.ClassificationFallbackWorkspace
+	}
+	if workspaceID == "" {
+		logger.Warn("classify: skipped — no workspaceId on message and no fallback configured",
+			zap.Int("entryIndex", out.Index),
+		)
+		s.deps.Metrics.ClassificationFailure("no-workspace")
+		return
+	}
+
+	body, _, err := s.deps.Downloader.Download(ctx, s.deps.Config.StagingBucket, out.ChildKey)
+	if err != nil {
+		logger.Warn("classify: download child failed",
+			zap.Int("entryIndex", out.Index),
+			zap.String("childKey", out.ChildKey),
+			zap.Error(err),
+		)
+		s.deps.Metrics.ClassificationFailure("download")
+		return
+	}
+	defer body.Close()
+
+	result, err := s.deps.Classifier.Classify(ctx, ClassifyRequest{
+		WorkspaceID:        workspaceID,
+		Filename:           out.SafeName,
+		ContentType:        out.MimeType,
+		ParentArchiveDepth: 1,
+		Body:               body,
+	})
+	if err != nil {
+		logger.Warn("classify: call failed",
+			zap.Int("entryIndex", out.Index),
+			zap.String("childKey", out.ChildKey),
+			zap.Error(err),
+		)
+		s.deps.Metrics.ClassificationFailure("http")
+		return
+	}
+	out.Classification = result
+	if result != nil {
+		s.deps.Metrics.ClassificationSuccess(result.Category)
+	}
 }
 
 func (s *Service) recordFailedEntry(ctx context.Context, msg ClaimCheck, out EntryOutcome, idx int) {

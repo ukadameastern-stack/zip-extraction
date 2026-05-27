@@ -20,6 +20,7 @@ import (
 	"github.com/org-placeholder/doc-uploader/services/zip-extraction/internal/app"
 	"github.com/org-placeholder/doc-uploader/services/zip-extraction/internal/awsclients"
 	"github.com/org-placeholder/doc-uploader/services/zip-extraction/internal/bombdefence"
+	"github.com/org-placeholder/doc-uploader/services/zip-extraction/internal/classification"
 	"github.com/org-placeholder/doc-uploader/services/zip-extraction/internal/config"
 	"github.com/org-placeholder/doc-uploader/services/zip-extraction/internal/dynamodb"
 	"github.com/org-placeholder/doc-uploader/services/zip-extraction/internal/extraction"
@@ -105,6 +106,21 @@ func run() error {
 	slipsheetWriter := slipsheet.NewWriter(storageAdapter, cfg.Infra.StagingBucket, "slipsheets/")
 	sqsAdapter := sqs.NewAdapter(awsSet.SQS, cfg.Infra.QueueURL, cfg.SQS, logger)
 
+	// When CLASSIFICATION_URL is empty we leave the orchestrator's Classifier
+	// port nil so its `if s.deps.Classifier != nil` guard short-circuits — no
+	// wasted staging-download per child. The startup warning makes the
+	// disabled state loud so future regressions don't fail silently.
+	var classifierDep extraction.Classifier
+	if cfg.Classification.URL == "" {
+		logger.Warn("classification disabled: CLASSIFICATION_URL not set — per-entry classification hop will be skipped")
+	} else {
+		logger.Info("classification enabled", zap.String("url", cfg.Classification.URL))
+		classifierDep = classifierAdapter{c: classification.New(classification.Config{
+			URL:     cfg.Classification.URL,
+			Timeout: time.Duration(cfg.Classification.TimeoutSec) * time.Second,
+		})}
+	}
+
 	// 9. Extraction orchestrator.
 	ext := extraction.New(extraction.Dependencies{
 		Downloader:      storageAdapter,
@@ -114,14 +130,16 @@ func run() error {
 		BombChecker:     checker,
 		PathValidator:   pathValidator,
 		Retrier:         retrier,
+		Classifier:      classifierDep,
 		Metrics:         m,
 		Logger:          logger,
 		Clock:           extraction.SystemClock{},
 		Config: extraction.ExtractionConfig{
-			MaxExtractionDurationSec: cfg.BombDefence.MaxExtractionDurationSec,
-			StagingBucket:            cfg.Infra.StagingBucket,
-			SSEMode:                  cfg.SSE.Mode,
-			SSEKMSKeyID:              cfg.SSE.KMSKeyID,
+			MaxExtractionDurationSec:        cfg.BombDefence.MaxExtractionDurationSec,
+			StagingBucket:                   cfg.Infra.StagingBucket,
+			SSEMode:                         cfg.SSE.Mode,
+			SSEKMSKeyID:                     cfg.SSE.KMSKeyID,
+			ClassificationFallbackWorkspace: cfg.Classification.DefaultWorkspace,
 		},
 	})
 
@@ -139,6 +157,37 @@ func run() error {
 	)
 
 	return a.Run(rootCtx)
+}
+
+// classifierAdapter bridges the classification.Classifier HTTP client to the
+// extraction.Classifier port. Both have identical semantics but distinct types
+// to keep extraction free of an HTTP/JSON dependency.
+type classifierAdapter struct{ c classification.Classifier }
+
+func (a classifierAdapter) Classify(ctx context.Context, req extraction.ClassifyRequest) (*extraction.Classification, error) {
+	r, err := a.c.Classify(ctx, classification.Request{
+		WorkspaceID:        req.WorkspaceID,
+		Filename:           req.Filename,
+		ContentType:        req.ContentType,
+		ParentArchiveDepth: req.ParentArchiveDepth,
+		Body:               req.Body,
+	})
+	if err != nil || r == nil {
+		return nil, err
+	}
+	return &extraction.Classification{
+		Format:            r.Format,
+		Category:          r.Category,
+		SubCategory:       r.SubCategory,
+		ConfidenceScore:   r.ConfidenceScore,
+		DetectionTier:     r.DetectionTier,
+		IsForcedSlipsheet: r.IsForcedSlipsheet,
+		SlipsheetReason:   r.SlipsheetReason,
+		ContentHash:       r.ContentHash,
+		IsDuplicate:       r.IsDuplicate,
+		PolicyVersion:     r.PolicyVersion,
+		ElapsedMs:         r.ElapsedMs,
+	}, nil
 }
 
 // queueAdapter adapts *sqs.Adapter to the app.Queue port signature.

@@ -14,7 +14,7 @@ IMG_REPO   ?= 537462380503.dkr.ecr.eu-west-1.amazonaws.com/doc-uploader-sandbox/
 IMG_TAG    ?= dev-$(shell git rev-parse --short HEAD 2>/dev/null || echo "untracked")
 PLATFORMS  ?= linux/amd64,linux/arm64
 
-.PHONY: help build test lint vuln sbom up down bootstrap run docker docker-multiarch helm-template helm-lint pbt-replay harness clean \
+.PHONY: help build test lint vuln sbom up down bootstrap run docker docker-multiarch helm-template helm-lint pbt-replay harness clean qa qa-lint qa-vuln coverage-gate \
         deploy-dev05 undeploy-dev05 list-dev05 logs-dev05 dev05-helm-install dev05-bootstrap dev05-push dev05-helm-deploy dev05-route53-bind dev05-route53-unbind dev05-teardown-k8s dev05-teardown-aws
 
 help:
@@ -33,6 +33,7 @@ help:
 	@echo "  helm-template    - render Helm chart against sandbox values"
 	@echo "  helm-lint        - lint Helm chart"
 	@echo "  pbt-replay       - replay a PBT failure (SEED=<n>)"
+	@echo "  qa               - run the full CI gate locally: mod-verify + build + test + coverage>=80 + lint + vuln + helm-lint"
 	@echo "  clean            - remove bin/ and CI artefacts"
 	@echo ""
 	@echo "DEV05 (AWS account 537462380503 / eu-west-1 / DEV05-EKS-CLUSTER):"
@@ -105,6 +106,59 @@ harness:
 
 clean:
 	rm -rf bin/ sbom.cyclonedx.json coverage.out cover.out
+
+# qa mirrors the gates the CI workflow (.github/workflows/ci.yml) enforces:
+# mod verify + build + test (race + coverage) + coverage gate >=80% +
+# incremental lint + govulncheck + (when helm is available) helm-lint +
+# helm-template. The lint step uses --new-from-rev=HEAD so it gates on what
+# THIS working tree introduces — matching the CI semantic where on-main the
+# baseline is the previous commit. Pre-existing findings flagged by newer
+# golangci-lint versions are reported by `make lint`; run that separately
+# for a full baseline sweep.
+# Helm steps are skipped with a warning when the binary is missing so qa
+# stays usable on dev laptops without the full toolchain.
+qa: build test coverage-gate qa-lint qa-vuln
+	@$(GO) mod verify
+	@command -v $(HELM) >/dev/null 2>&1 \
+	    && { echo "==> helm lint + template"; $(MAKE) --no-print-directory helm-lint helm-template >/dev/null; } \
+	    || echo "==> helm not installed — skipping helm-lint/helm-template (CI will run them)"
+	@echo "==> qa green"
+
+qa-lint:
+	@echo "==> lint (incremental: --new-from-rev=HEAD)"
+	$(GOLANGCI) run --new-from-rev=HEAD
+
+# qa-vuln gates only on third-party vulnerabilities our code reaches. Stdlib
+# vulns are reported but treated as informational because they track the Go
+# runtime version — remediated by upgrading the SDK, not by code changes.
+# Run `make vuln` for the full strict gate (fails on any reachable vuln).
+#
+# Detection: parse `Found in: <pkg>@<version>` lines; stdlib pins use
+# `@go1.X.Y`, third-party use `@vMAJOR.MINOR.PATCH`. Any non-stdlib match
+# fails qa.
+qa-vuln:
+	@echo "==> govulncheck (gates on non-stdlib vulns; stdlib reported but informational)"
+	@set +e; \
+	    $(GO) run -modfile=tools/go.mod golang.org/x/vuln/cmd/govulncheck ./... > .vuln.out 2>&1; \
+	    rc=$$?; \
+	    cat .vuln.out; \
+	    if [ "$$rc" = "0" ]; then \
+	        rm -f .vuln.out; \
+	        echo "==> qa-vuln OK: no reachable vulns"; \
+	        exit 0; \
+	    fi; \
+	    non_stdlib=$$(grep -E '^    Found in: ' .vuln.out | grep -vcE '@go[0-9]'); \
+	    rm -f .vuln.out; \
+	    if [ "$$non_stdlib" -gt 0 ]; then \
+	        echo "==> qa-vuln FAILED: $$non_stdlib third-party vulnerability/vulnerabilities reachable"; \
+	        exit 1; \
+	    fi; \
+	    echo "==> qa-vuln OK: only stdlib vulns reachable (upgrade Go SDK to remediate)"
+
+coverage-gate:
+	@test -f cover.out || (echo "cover.out missing — run 'make test' first" && exit 1)
+	@$(GO) tool cover -func=cover.out | awk '/^total:/ {print $$3}' | sed 's/%//' \
+	    | awk '{ if ($$1 < 80) { printf "coverage gate FAILED: %s%% (< 80%%)\n", $$1; exit 1 } else { printf "coverage gate OK: %s%%\n", $$1 } }'
 
 # -------------------------------------------------------------------------
 # DEV05 deploy / revert

@@ -45,7 +45,16 @@ services:
       LOG_LEVEL: debug
       HTTP_PORT: "8080"
       SSE_MODE: SSE-S3
+      # Wire the per-child classification hop to the classification-service
+      # demo UI, which runs from a separate compose stack on the host. We
+      # reach it via host.docker.internal (extra_hosts adds the Linux gateway
+      # mapping; on Docker Desktop the alias is built in). Override or unset
+      # these to disable classification.
+      CLASSIFICATION_URL: http://host.docker.internal:3000
+      CLASSIFICATION_DEFAULT_WORKSPACE: wks-ui-001
       CONFIG_PATH: /etc/zip-extraction/config.yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8080:8080"
     volumes:

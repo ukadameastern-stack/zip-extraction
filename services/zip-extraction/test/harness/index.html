@@ -124,8 +124,8 @@
         <span class="live" id="runs-updated">—</span>
       </div>
       <table class="runs-table">
-        <thead><tr><th>Exec id</th><th>Source archive</th><th>Tenant</th><th>Size</th><th>Children</th><th>Status</th><th>Written at</th><th>Failure reason</th></tr></thead>
-        <tbody id="runs-tbody"><tr><td colspan="8" class="muted">loading…</td></tr></tbody>
+        <thead><tr><th>Exec id</th><th>Source archive</th><th>Tenant</th><th>Size</th><th>Children</th><th>Classification</th><th>Status</th><th>Written at</th><th>Failure reason</th></tr></thead>
+        <tbody id="runs-tbody"><tr><td colspan="9" class="muted">loading…</td></tr></tbody>
       </table>
       <div class="muted" style="font-size: 11px; margin-top: 8px;">Click a row to load that run into the Result panel below.</div>
     </section>
@@ -144,7 +144,7 @@
       <div class="grid2">
         <div>
           <label>tenantId</label>
-          <input type="text" id="tenantId" placeholder="tenant-harness">
+          <input type="text" id="tenantId" placeholder="wks-ui-001">
         </div>
         <div>
           <label>documentId</label>
@@ -182,8 +182,8 @@
 
       <h2 style="margin-top: 18px;">DynamoDB rows</h2>
       <table>
-        <thead><tr><th>SK</th><th>Status</th><th>Child key</th><th>MIME</th><th>Size</th><th>Failure reason</th><th>Failure detail</th></tr></thead>
-        <tbody id="ddb-tbody"><tr><td colspan="7" class="muted">no rows</td></tr></tbody>
+        <thead><tr><th>SK</th><th>Status</th><th>Child key</th><th>MIME</th><th>Size</th><th>Classification</th><th>Failure reason</th><th>Failure detail</th></tr></thead>
+        <tbody id="ddb-tbody"><tr><td colspan="8" class="muted">no rows</td></tr></tbody>
       </table>
 
       <h2 style="margin-top: 18px;">S3 input/{exec}/* listing</h2>
@@ -289,10 +289,28 @@ async function pollResult(execId) {
   try {
     const data = await fetch(`/api/result?execId=${encodeURIComponent(execId)}`).then(r => r.json());
 
+    // Build a lookup: entryIndex -> classification, sourced from the slipsheet
+    // (DDB rows don't carry classification; the slipsheet is authoritative).
+    const classByIdx = {};
+    if (data.slipsheet && Array.isArray(data.slipsheet.children)) {
+      data.slipsheet.children.forEach(c => {
+        if (c && c.classification) classByIdx[String(c.entryIndex)] = c.classification;
+      });
+    }
+    function renderClassification(cls) {
+      if (!cls) return "—";
+      const cat = cls.category || "?";
+      const fmt = cls.format ? ` <span class="muted">${cls.format}</span>` : "";
+      const conf = (typeof cls.confidenceScore === "number")
+        ? ` <span class="muted">${(cls.confidenceScore * 100).toFixed(0)}%</span>`
+        : "";
+      return `<span class="mono">${cat}${fmt}${conf}</span>`;
+    }
+
     // DDB rows
     const tbody = $("ddb-tbody");
     if (!data.ddbRows || data.ddbRows.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" class="muted">no rows yet</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="muted">no rows yet</td></tr>';
     } else {
       tbody.innerHTML = data.ddbRows.map(r => `
         <tr>
@@ -301,6 +319,7 @@ async function pollResult(execId) {
           <td class="mono">${r.childKey || ""}</td>
           <td class="mono">${r.mimeType || ""}</td>
           <td class="mono">${r.sizeBytes || ""}</td>
+          <td>${renderClassification(classByIdx[String(r.entryIndex)])}</td>
           <td class="mono">${r.failureReason || ""}</td>
           <td style="color: var(--warn); font-size: 11px;">${r.failureDetail || ""}</td>
         </tr>
@@ -458,7 +477,7 @@ async function pollRuns() {
     const data = await fetch("/api/runs").then(r => r.json());
     const tbody = $("runs-tbody");
     if (!data.runs || data.runs.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" class="muted">(no past runs yet)</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" class="muted">(no past runs yet)</td></tr>';
     } else {
       tbody.innerHTML = data.runs.map(r => `
         <tr data-exec="${r.execId}">
@@ -467,6 +486,7 @@ async function pollRuns() {
           <td class="mono">${r.tenantId || "—"}</td>
           <td class="mono">${humanSize(r.sourceSizeBytes)}</td>
           <td class="mono">${r.childCount}</td>
+          <td class="mono">${r.classificationSummary || "—"}</td>
           <td><span class="badge ${r.status || ""}">${r.status || ""}</span></td>
           <td class="mono">${r.writtenAt || ""}</td>
           <td style="color: var(--warn); font-size: 11px;">${r.failureReason || ""}</td>

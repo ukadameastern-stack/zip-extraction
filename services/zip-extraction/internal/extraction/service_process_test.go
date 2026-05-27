@@ -170,25 +170,61 @@ func (passRetrier) Do(ctx context.Context, op func(ctx context.Context) error) e
 }
 
 type recordingMetrics struct {
-	mu                  sync.Mutex
-	entries             []string
-	failures            []string
-	bombRules           []int
-	bytesExtracted      int64
-	partialFailures     int
-	redeliverySkips     int
-	slipsheetFailures   int
-	extractionDurations int
+	mu                    sync.Mutex
+	entries               []string
+	failures              []string
+	bombRules             []int
+	bytesExtracted        int64
+	partialFailures       int
+	redeliverySkips       int
+	slipsheetFailures     int
+	extractionDurations   int
+	classificationSuccess []string
+	classificationFailure []string
 }
 
-func (r *recordingMetrics) EntryProcessed(s string)                              { r.mu.Lock(); defer r.mu.Unlock(); r.entries = append(r.entries, s) }
-func (r *recordingMetrics) ExtractionDuration(d time.Duration, outcome string)   { r.mu.Lock(); defer r.mu.Unlock(); r.extractionDurations++ }
-func (r *recordingMetrics) ExtractionFailure(reason string)                      { r.mu.Lock(); defer r.mu.Unlock(); r.failures = append(r.failures, reason) }
-func (r *recordingMetrics) BombRejection(rule int)                               { r.mu.Lock(); defer r.mu.Unlock(); r.bombRules = append(r.bombRules, rule) }
-func (r *recordingMetrics) BytesExtracted(n int64)                               { r.mu.Lock(); defer r.mu.Unlock(); r.bytesExtracted += n }
-func (r *recordingMetrics) PartialFailure()                                      { r.mu.Lock(); defer r.mu.Unlock(); r.partialFailures++ }
-func (r *recordingMetrics) RedeliverySkip()                                      { r.mu.Lock(); defer r.mu.Unlock(); r.redeliverySkips++ }
-func (r *recordingMetrics) SlipsheetWriteFailure()                               { r.mu.Lock(); defer r.mu.Unlock(); r.slipsheetFailures++ }
+func (r *recordingMetrics) EntryProcessed(s string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.entries = append(r.entries, s)
+}
+func (r *recordingMetrics) ExtractionDuration(d time.Duration, outcome string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.extractionDurations++
+}
+func (r *recordingMetrics) ExtractionFailure(reason string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.failures = append(r.failures, reason)
+}
+func (r *recordingMetrics) BombRejection(rule int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.bombRules = append(r.bombRules, rule)
+}
+func (r *recordingMetrics) BytesExtracted(n int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.bytesExtracted += n
+}
+func (r *recordingMetrics) PartialFailure() { r.mu.Lock(); defer r.mu.Unlock(); r.partialFailures++ }
+func (r *recordingMetrics) RedeliverySkip() { r.mu.Lock(); defer r.mu.Unlock(); r.redeliverySkips++ }
+func (r *recordingMetrics) SlipsheetWriteFailure() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.slipsheetFailures++
+}
+func (r *recordingMetrics) ClassificationSuccess(category string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.classificationSuccess = append(r.classificationSuccess, category)
+}
+func (r *recordingMetrics) ClassificationFailure(reason string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.classificationFailure = append(r.classificationFailure, reason)
+}
 
 func buildDeps(t *testing.T, body []byte) (extraction.Dependencies, *fakeUploader, *fakeRecorder, *fakeSlipsheetWriter, *recordingMetrics) {
 	t.Helper()
@@ -408,4 +444,141 @@ func TestProcess_StatusBytesAccounting(t *testing.T) {
 	svc := extraction.New(deps)
 	_, _ = svc.Process(context.Background(), sampleMsg())
 	assert.Equal(t, int64(1024), m.bytesExtracted)
+}
+
+// --- Classification hop tests ---
+
+// fakeClassifier records calls and returns canned outputs / errors per call index.
+type fakeClassifier struct {
+	mu      sync.Mutex
+	calls   []extraction.ClassifyRequest
+	results []*extraction.Classification // index aligned with calls
+	errs    []error                      // index aligned with calls
+}
+
+func (f *fakeClassifier) Classify(ctx context.Context, req extraction.ClassifyRequest) (*extraction.Classification, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Drain the body to mirror real client semantics (otherwise the io.Reader could leak).
+	if req.Body != nil {
+		_, _ = io.Copy(io.Discard, req.Body)
+	}
+	idx := len(f.calls)
+	f.calls = append(f.calls, req)
+	var res *extraction.Classification
+	if idx < len(f.results) {
+		res = f.results[idx]
+	}
+	var err error
+	if idx < len(f.errs) {
+		err = f.errs[idx]
+	}
+	return res, err
+}
+
+func TestProcess_Classification_StampedOnSuccess(t *testing.T) {
+	zipBytes := makeZip(t, map[string][]byte{"a.txt": []byte("hello")})
+	deps, _, _, slip, m := buildDeps(t, zipBytes)
+
+	fc := &fakeClassifier{
+		results: []*extraction.Classification{
+			{Format: "txt", Category: "ocr-direct", ConfidenceScore: 0.99, DetectionTier: "extension-fallback", PolicyVersion: "v1"},
+		},
+	}
+	deps.Classifier = fc
+	svc := extraction.New(deps)
+
+	out, err := svc.Process(context.Background(), sampleMsg())
+	require.NoError(t, err)
+	assert.Equal(t, extraction.StatusSuccess, out.Status)
+
+	require.Len(t, fc.calls, 1)
+	assert.Equal(t, "t", fc.calls[0].WorkspaceID) // from sampleMsg().TenantID
+	assert.Equal(t, "a.txt", fc.calls[0].Filename)
+	assert.Equal(t, 1, fc.calls[0].ParentArchiveDepth)
+
+	require.Len(t, slip.lastEntries, 1)
+	require.NotNil(t, slip.lastEntries[0].Classification, "classification should be stamped on EntryOutcome")
+	assert.Equal(t, "txt", slip.lastEntries[0].Classification.Format)
+	assert.Equal(t, "ocr-direct", slip.lastEntries[0].Classification.Category)
+
+	assert.Equal(t, []string{"ocr-direct"}, m.classificationSuccess)
+	assert.Empty(t, m.classificationFailure)
+}
+
+func TestProcess_Classification_FailureDoesNotAffectOutcome(t *testing.T) {
+	zipBytes := makeZip(t, map[string][]byte{"a.txt": []byte("hello")})
+	deps, _, _, slip, m := buildDeps(t, zipBytes)
+
+	fc := &fakeClassifier{errs: []error{errors.New("classifier exploded")}}
+	deps.Classifier = fc
+	svc := extraction.New(deps)
+
+	out, err := svc.Process(context.Background(), sampleMsg())
+	require.NoError(t, err)
+	assert.Equal(t, extraction.StatusSuccess, out.Status, "classification failure must not change archive outcome")
+
+	require.Len(t, slip.lastEntries, 1)
+	assert.Equal(t, extraction.EntryStatusUploaded, slip.lastEntries[0].Status)
+	assert.Nil(t, slip.lastEntries[0].Classification)
+
+	assert.Empty(t, m.classificationSuccess)
+	assert.Equal(t, []string{"http"}, m.classificationFailure)
+}
+
+func TestProcess_Classification_FallbackWorkspace(t *testing.T) {
+	zipBytes := makeZip(t, map[string][]byte{"a.txt": []byte("hi")})
+	deps, _, _, _, _ := buildDeps(t, zipBytes)
+	deps.Config.ClassificationFallbackWorkspace = "wks-default"
+	fc := &fakeClassifier{results: []*extraction.Classification{{Format: "txt"}}}
+	deps.Classifier = fc
+	svc := extraction.New(deps)
+
+	msg := sampleMsg()
+	msg.TenantID = "" // empty → must fall back to configured default
+	_, err := svc.Process(context.Background(), msg)
+	require.NoError(t, err)
+
+	require.Len(t, fc.calls, 1)
+	assert.Equal(t, "wks-default", fc.calls[0].WorkspaceID)
+}
+
+func TestProcess_Classification_NoWorkspaceSkipped(t *testing.T) {
+	zipBytes := makeZip(t, map[string][]byte{"a.txt": []byte("hi")})
+	deps, _, _, _, m := buildDeps(t, zipBytes)
+	fc := &fakeClassifier{}
+	deps.Classifier = fc
+	svc := extraction.New(deps)
+
+	msg := sampleMsg()
+	msg.TenantID = "" // no fallback configured → skipped
+	_, err := svc.Process(context.Background(), msg)
+	require.NoError(t, err)
+
+	assert.Empty(t, fc.calls, "classifier should not be called without a workspaceId")
+	assert.Equal(t, []string{"no-workspace"}, m.classificationFailure)
+}
+
+func TestProcess_Classification_NilClassifier_NoCall(t *testing.T) {
+	zipBytes := makeZip(t, map[string][]byte{"a.txt": []byte("hi")})
+	deps, _, _, slip, _ := buildDeps(t, zipBytes)
+	deps.Classifier = nil
+	svc := extraction.New(deps)
+	_, err := svc.Process(context.Background(), sampleMsg())
+	require.NoError(t, err)
+	assert.Nil(t, slip.lastEntries[0].Classification)
+}
+
+func TestProcess_Classification_NotCalledOnFailedEntry(t *testing.T) {
+	zipBytes := makeZip(t, map[string][]byte{"a.txt": []byte("hi")})
+	deps, _, _, _, _ := buildDeps(t, zipBytes)
+	// Per-key upload failure on the only entry.
+	deps.Uploader = &fakeUploader{keyErr: map[string]error{"input/exec-1/0001-a.txt": errors.New("S3 boom")}}
+	fc := &fakeClassifier{}
+	deps.Classifier = fc
+	svc := extraction.New(deps)
+	_, err := svc.Process(context.Background(), sampleMsg())
+	require.NoError(t, err)
+
+	assert.Empty(t, fc.calls, "classifier must not be called for failed entries")
 }

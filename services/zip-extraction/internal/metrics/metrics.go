@@ -11,14 +11,16 @@ import (
 
 // Metrics is the typed collector facade consumed via the extraction.Metrics port.
 type Metrics struct {
-	entriesTotal       *prometheus.CounterVec
-	extractionDuration *prometheus.HistogramVec
-	extractionFailures *prometheus.CounterVec
-	bombRejections    *prometheus.CounterVec
-	bytesExtracted    prometheus.Counter
-	partialFailures   prometheus.Counter
-	redeliverySkips   prometheus.Counter
-	slipsheetFailures prometheus.Counter
+	entriesTotal            *prometheus.CounterVec
+	extractionDuration      *prometheus.HistogramVec
+	extractionFailures      *prometheus.CounterVec
+	bombRejections          *prometheus.CounterVec
+	bytesExtracted          prometheus.Counter
+	partialFailures         prometheus.Counter
+	redeliverySkips         prometheus.Counter
+	slipsheetFailures       prometheus.Counter
+	classificationSuccesses *prometheus.CounterVec
+	classificationFailures  *prometheus.CounterVec
 }
 
 // New constructs a *Metrics and registers all collectors on reg.
@@ -57,6 +59,14 @@ func New(reg prometheus.Registerer) *Metrics {
 			Name: "slipsheet_write_failures_total",
 			Help: "Count of slipsheet S3 write failures.",
 		}),
+		classificationSuccesses: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "classification_calls_total",
+			Help: "Count of successful classification calls, by returned category.",
+		}, []string{"category"}),
+		classificationFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "classification_failures_total",
+			Help: "Count of classification call failures, by failure reason (download | http).",
+		}, []string{"reason"}),
 	}
 	reg.MustRegister(
 		m.entriesTotal,
@@ -67,6 +77,8 @@ func New(reg prometheus.Registerer) *Metrics {
 		m.partialFailures,
 		m.redeliverySkips,
 		m.slipsheetFailures,
+		m.classificationSuccesses,
+		m.classificationFailures,
 	)
 	return m
 }
@@ -104,6 +116,16 @@ func (m *Metrics) RedeliverySkip() { m.redeliverySkips.Inc() }
 
 // SlipsheetWriteFailure implements extraction.Metrics.
 func (m *Metrics) SlipsheetWriteFailure() { m.slipsheetFailures.Inc() }
+
+// ClassificationSuccess implements extraction.Metrics.
+func (m *Metrics) ClassificationSuccess(category string) {
+	m.classificationSuccesses.WithLabelValues(category).Inc()
+}
+
+// ClassificationFailure implements extraction.Metrics.
+func (m *Metrics) ClassificationFailure(reason string) {
+	m.classificationFailures.WithLabelValues(reason).Inc()
+}
 
 func itoa(n int) string {
 	if n == 0 {

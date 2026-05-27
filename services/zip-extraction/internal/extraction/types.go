@@ -92,16 +92,38 @@ type EntryInfo struct {
 // the Prometheus failure-reason label (e.g. "bomb-defence rule 3").
 // FailureDetail is the human-readable explanation, often carrying dynamic
 // context such as the actual measured ratio. Both are empty for UPLOADED entries.
+//
+// Classification is non-nil only when the optional classification step ran
+// and succeeded for this entry. Stamped onto the slipsheet so the downstream
+// pipeline can consume it without a second classifier hop.
 type EntryOutcome struct {
-	Index         int
-	SafeName      string
-	ChildKey      string
-	MimeType      string
-	SizeBytes     int64
-	Status        string // "UPLOADED" | "FAILED"
-	FailureReason string
-	FailureDetail string
-	RecordedAt    time.Time
+	Index          int
+	SafeName       string
+	ChildKey       string
+	MimeType       string
+	SizeBytes      int64
+	Status         string // "UPLOADED" | "FAILED"
+	FailureReason  string
+	FailureDetail  string
+	RecordedAt     time.Time
+	Classification *Classification
+}
+
+// Classification is the slipsheet-friendly subset of the classification
+// service's /api/classify response. Mirrors classification.Result so the
+// extraction layer doesn't depend on the classification package's HTTP types.
+type Classification struct {
+	Format            string  `json:"format"`
+	Category          string  `json:"category"`
+	SubCategory       string  `json:"subCategory,omitempty"`
+	ConfidenceScore   float64 `json:"confidenceScore"`
+	DetectionTier     string  `json:"detectionTier"`
+	IsForcedSlipsheet bool    `json:"isForcedSlipsheet"`
+	SlipsheetReason   string  `json:"slipsheetReason,omitempty"`
+	ContentHash       string  `json:"contentHash,omitempty"`
+	IsDuplicate       bool    `json:"isDuplicate,omitempty"`
+	PolicyVersion     string  `json:"policyVersion,omitempty"`
+	ElapsedMs         int     `json:"elapsedMs,omitempty"`
 }
 
 // PipelineFile is the DynamoDB row schema per BR-DDB-001 (FR-5.2).

@@ -183,7 +183,13 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	tenantID := stringDefault(r.FormValue("tenantId"), "tenant-harness")
+	// Default tenantId matches the workspace configured in the local
+	// classification-service demo UI (the only one its DynamoDB seeds), so a
+	// bare Submit click routes the per-child classification hop to a workspace
+	// that exists. ClaimCheck.tenantId is a required field (FR-1.2) — leaving
+	// it blank would be rejected by the service's SQS schema validation.
+	// Operators on a real environment override this via the form field.
+	tenantID := stringDefault(r.FormValue("tenantId"), "wks-ui-001")
 	documentID := stringDefault(r.FormValue("documentId"), "doc-"+time.Now().UTC().Format("20060102T150405Z"))
 	execID := stringDefault(r.FormValue("pipelineExecutionId"), "exec-"+time.Now().UTC().Format("20060102T150405.000Z"))
 	correlationID := stringDefault(r.FormValue("correlationId"), "corr-"+execID)
@@ -248,11 +254,11 @@ type resultRow struct {
 }
 
 type resultResp struct {
-	State      string                 `json:"state"` // "pending" | "complete"
-	Slipsheet  map[string]interface{} `json:"slipsheet,omitempty"`
-	DDBRows    []resultRow            `json:"ddbRows"`
-	S3Listing  []string               `json:"s3Listing"`
-	Error      string                 `json:"error,omitempty"`
+	State     string                 `json:"state"` // "pending" | "complete"
+	Slipsheet map[string]interface{} `json:"slipsheet,omitempty"`
+	DDBRows   []resultRow            `json:"ddbRows"`
+	S3Listing []string               `json:"s3Listing"`
+	Error     string                 `json:"error,omitempty"`
 }
 
 func (s *server) handleResult(w http.ResponseWriter, r *http.Request) {
@@ -399,15 +405,17 @@ func (s *server) queueDepthFor(ctx context.Context, url string) queueDepth {
 }
 
 type runSummary struct {
-	ExecID          string `json:"execId"`
-	SourceArchive   string `json:"sourceArchive"`
-	TenantID        string `json:"tenantId,omitempty"`
-	SourceSizeBytes int64  `json:"sourceSizeBytes,omitempty"`
-	ChildCount      int    `json:"childCount"`
-	Status          string `json:"status"`
-	WrittenAt       string `json:"writtenAt"`
-	FailureReason   string `json:"failureReason,omitempty"`
-	SlipsheetKey    string `json:"slipsheetKey"`
+	ExecID                string `json:"execId"`
+	SourceArchive         string `json:"sourceArchive"`
+	TenantID              string `json:"tenantId,omitempty"`
+	SourceSizeBytes       int64  `json:"sourceSizeBytes,omitempty"`
+	ChildCount            int    `json:"childCount"`
+	Status                string `json:"status"`
+	WrittenAt             string `json:"writtenAt"`
+	FailureReason         string `json:"failureReason,omitempty"`
+	SlipsheetKey          string `json:"slipsheetKey"`
+	ClassificationSummary string `json:"classificationSummary,omitempty"` // e.g. "convert:2, ocr-direct:1"
+	ClassifiedCount       int    `json:"classifiedCount"`
 }
 
 type runsResp struct {
@@ -462,6 +470,7 @@ func (s *server) handleRuns(w http.ResponseWriter, r *http.Request) {
 				if cc, ok := slip["childCount"].(float64); ok {
 					summary.ChildCount = int(cc)
 				}
+				summary.ClassificationSummary, summary.ClassifiedCount = classificationSummary(slip)
 			}
 		}
 
@@ -490,6 +499,48 @@ func writeJSON(w http.ResponseWriter, status int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// classificationSummary walks slipsheet.children[].classification.category and
+// returns a compact "cat:n, cat:n" summary + the total classified count.
+// Returns ("", 0) when no entries carry a classification block.
+func classificationSummary(slip map[string]interface{}) (summary string, classified int) {
+	children, ok := slip["children"].([]interface{})
+	if !ok {
+		return "", 0
+	}
+	counts := map[string]int{}
+	total := 0
+	for _, c := range children {
+		row, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		cls, ok := row["classification"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		cat, _ := cls["category"].(string)
+		if cat == "" {
+			cat = "?"
+		}
+		counts[cat]++
+		total++
+	}
+	if total == 0 {
+		return "", 0
+	}
+	// Stable ordering: alphabetic by category.
+	keys := make([]string, 0, len(counts))
+	for k := range counts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s:%d", k, counts[k]))
+	}
+	return strings.Join(parts, ", "), total
 }
 
 func attrS(item map[string]ddbtypes.AttributeValue, key string) string {

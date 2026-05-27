@@ -27,3 +27,6 @@ data:
       maxInFlight:                {{ .Values.sqs.maxInFlight }}
       gracefulShutdownTimeoutSec: {{ .Values.sqs.gracefulShutdownTimeoutSec }}
       visibilityTimeoutSec:       {{ .Values.sqs.visibilityTimeoutSec }}
+    classification:
+      timeoutSec:                 {{ .Values.classification.timeoutSec }}
+      defaultWorkspace:           {{ .Values.classification.defaultWorkspace | quote }}

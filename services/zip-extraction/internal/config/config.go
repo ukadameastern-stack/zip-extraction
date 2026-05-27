@@ -15,14 +15,15 @@ import (
 
 // Config aggregates all runtime configuration.
 type Config struct {
-	Infra       InfraConfig
-	HTTP        HTTPConfig
-	Logging     LoggingConfig
-	SSE         SSEConfig
-	BombDefence BombDefenceConfig `yaml:"bombDefence"`
-	Streaming   StreamingConfig   `yaml:"streaming"`
-	Retry       RetryConfig       `yaml:"retry"`
-	SQS         SQSConfig         `yaml:"sqs"`
+	Infra          InfraConfig
+	HTTP           HTTPConfig
+	Logging        LoggingConfig
+	SSE            SSEConfig
+	BombDefence    BombDefenceConfig    `yaml:"bombDefence"`
+	Streaming      StreamingConfig      `yaml:"streaming"`
+	Retry          RetryConfig          `yaml:"retry"`
+	SQS            SQSConfig            `yaml:"sqs"`
+	Classification ClassificationConfig `yaml:"classification"`
 }
 
 // InfraConfig holds environment-injected infrastructure references (FR-14.1).
@@ -53,14 +54,14 @@ type SSEConfig struct {
 
 // BombDefenceConfig holds the 12-rule defence thresholds (FR-7 + BR-BOMB-009/010).
 type BombDefenceConfig struct {
-	MaxCompressedSizeBytes           int64   `yaml:"maxCompressedSizeBytes"`
-	MaxExtractedSizeBytes            int64   `yaml:"maxExtractedSizeBytes"`
-	MaxCompressionRatio              float64 `yaml:"maxCompressionRatio"`
-	MaxEntryCount                    int     `yaml:"maxEntryCount"`
-	MaxDirectoryDepth                int     `yaml:"maxDirectoryDepth"`
-	MaxSingleFileSizeBytes           int64   `yaml:"maxSingleFileSizeBytes"`
-	MaxExtractionDurationSec         int     `yaml:"maxExtractionDurationSec"`
-	MaxTotalDeclaredUncompressedBytes int64  `yaml:"maxTotalDeclaredUncompressedBytes"`
+	MaxCompressedSizeBytes            int64   `yaml:"maxCompressedSizeBytes"`
+	MaxExtractedSizeBytes             int64   `yaml:"maxExtractedSizeBytes"`
+	MaxCompressionRatio               float64 `yaml:"maxCompressionRatio"`
+	MaxEntryCount                     int     `yaml:"maxEntryCount"`
+	MaxDirectoryDepth                 int     `yaml:"maxDirectoryDepth"`
+	MaxSingleFileSizeBytes            int64   `yaml:"maxSingleFileSizeBytes"`
+	MaxExtractionDurationSec          int     `yaml:"maxExtractionDurationSec"`
+	MaxTotalDeclaredUncompressedBytes int64   `yaml:"maxTotalDeclaredUncompressedBytes"`
 }
 
 // StreamingConfig holds streaming-I/O constants (NFR-Z-014).
@@ -83,6 +84,15 @@ type SQSConfig struct {
 	MaxInFlight                int `yaml:"maxInFlight"`
 	GracefulShutdownTimeoutSec int `yaml:"gracefulShutdownTimeoutSec"`
 	VisibilityTimeoutSec       int `yaml:"visibilityTimeoutSec"`
+}
+
+// ClassificationConfig holds the optional per-child classification hop.
+// URL is supplied via the CLASSIFICATION_URL env var; empty disables the hop.
+// WorkspaceID falls back to the inbound ClaimCheck.TenantID when empty.
+type ClassificationConfig struct {
+	URL              string `yaml:"url"`
+	TimeoutSec       int    `yaml:"timeoutSec"`
+	DefaultWorkspace string `yaml:"defaultWorkspace"`
 }
 
 // Load reads env vars + parses YAML at $CONFIG_PATH and returns a validated
@@ -112,6 +122,11 @@ func Load() (Config, error) {
 	c.SSE = SSEConfig{
 		Mode:     getEnvDefault("SSE_MODE", "SSE-S3"),
 		KMSKeyID: os.Getenv("SSE_KMS_KEY_ID"),
+	}
+
+	c.Classification.URL = os.Getenv("CLASSIFICATION_URL")
+	if v := os.Getenv("CLASSIFICATION_DEFAULT_WORKSPACE"); v != "" {
+		c.Classification.DefaultWorkspace = v
 	}
 
 	yamlPath := getEnvDefault("CONFIG_PATH", "/etc/zip-extraction/config.yaml")

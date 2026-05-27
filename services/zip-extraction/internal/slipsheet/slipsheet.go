@@ -34,13 +34,18 @@ type Slipsheet struct {
 }
 
 // ChildEntry is one row in Slipsheet.Children.
+//
+// Classification is set when the optional classification hop ran for this
+// entry; nil otherwise. Downstream consumers can rely on its presence to skip
+// a second classification pass.
 type ChildEntry struct {
-	EntryIndex    int    `json:"entryIndex"`
-	ChildKey      string `json:"childKey"`
-	Status        string `json:"status"` // "UPLOADED" | "FAILED"
-	FailureReason string `json:"failureReason,omitempty"`
-	FailureDetail string `json:"failureDetail,omitempty"`
-	SizeBytes     int64  `json:"sizeBytes"`
+	EntryIndex     int                        `json:"entryIndex"`
+	ChildKey       string                     `json:"childKey"`
+	Status         string                     `json:"status"` // "UPLOADED" | "FAILED"
+	FailureReason  string                     `json:"failureReason,omitempty"`
+	FailureDetail  string                     `json:"failureDetail,omitempty"`
+	SizeBytes      int64                      `json:"sizeBytes"`
+	Classification *extraction.Classification `json:"classification,omitempty"`
 }
 
 // SlipsheetType is the constant value for Slipsheet.Type.
@@ -70,12 +75,13 @@ func Build(
 	}
 	for _, e := range entries {
 		ss.Children = append(ss.Children, ChildEntry{
-			EntryIndex:    e.Index,
-			ChildKey:      e.ChildKey,
-			Status:        e.Status,
-			FailureReason: e.FailureReason,
-			FailureDetail: e.FailureDetail,
-			SizeBytes:     e.SizeBytes,
+			EntryIndex:     e.Index,
+			ChildKey:       e.ChildKey,
+			Status:         e.Status,
+			FailureReason:  e.FailureReason,
+			FailureDetail:  e.FailureDetail,
+			SizeBytes:      e.SizeBytes,
+			Classification: e.Classification,
 		})
 	}
 	sort.Slice(ss.Children, func(i, j int) bool {

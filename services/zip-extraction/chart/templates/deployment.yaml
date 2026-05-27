@@ -49,6 +49,14 @@ spec:
             - name: SSE_KMS_KEY_ID
               value: {{ .Values.sse.kmsKeyId | quote }}
             {{- end }}
+            {{- if .Values.classification.url }}
+            - name: CLASSIFICATION_URL
+              value: {{ .Values.classification.url | quote }}
+            {{- end }}
+            {{- if .Values.classification.defaultWorkspace }}
+            - name: CLASSIFICATION_DEFAULT_WORKSPACE
+              value: {{ .Values.classification.defaultWorkspace | quote }}
+            {{- end }}
             - name: CONFIG_PATH
               value: /etc/zip-extraction/config.yaml
           ports:

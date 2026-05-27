@@ -42,7 +42,21 @@ Helm release `zip-extraction-dev05` rendered from `chart/` with overlay `chart/v
 | Deployment                   | `zip-extraction-dev05` (replicaCount=1 for DEV05) |
 | Service (ClusterIP)          | `zip-extraction-dev05` (port 8080) |
 | ServiceAccount               | `zip-extraction` (annotated with the IAM role ARN for IRSA) |
-| ConfigMap                    | `zip-extraction-dev05` (bombDefence / streaming / retry / sqs tunables) |
+| ConfigMap                    | `zip-extraction-dev05` (bombDefence / streaming / retry / sqs / classification tunables) |
+
+### Cross-namespace dependency: classification service
+
+After each child is uploaded to staging, the service POSTs it to the classification service for per-child classification. Configured in `values-dev05.yaml`:
+
+| | |
+|---|---|
+| Endpoint     | `http://classification-ui.classification-service-sandbox.svc.cluster.local/api/classify` |
+| Owner ns     | `classification-service-sandbox` (deployed separately by the classification team) |
+| Auth         | none (in-cluster; NetworkPolicies in the target namespace must allow ingress from `zip-extraction-dev05`) |
+| Failure mode | best-effort — extraction succeeds even if classification is unreachable; slipsheet just omits the `classification` block per child |
+| Disable      | set `classification.url=""` in the values overlay (default in non-DEV05 envs) |
+
+**No new AWS resources, IAM permissions, or state.json keys** — the integration is pure in-cluster HTTP. Teardown is unaffected: `helm uninstall` removes the deployment's `CLASSIFICATION_URL` env var along with the pods.
 
 ## Targets
 

@@ -24,6 +24,14 @@ linters:
 linters-settings:
   govet:
     enable-all: true
+    disable:
+      # fieldalignment is a micro-packing optimisation, not a correctness
+      # check. It was effectively off in CI's older golangci-lint (v1.60.0)
+      # because the analyzer wasn't bundled by default — pre-existing
+      # structs across the codebase (ArchiveMetadata, EntryInfo,
+      # PipelineFile, Slipsheet) all violate it without CI breaking.
+      # Keeping it disabled keeps local lint in step with the CI gate.
+      - fieldalignment
   gosec:
     excludes:
       - G104    # errcheck handles unhandled errors; gosec duplicates

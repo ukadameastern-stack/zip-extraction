@@ -24,6 +24,15 @@ infra:
 sse:
   mode: "SSE-S3"        # DEV05 keeps S3-managed keys; no KMS to avoid cross-team permission setup
 
+# Per-child classification hop wired to the in-cluster classification-ui
+# Service in namespace classification-service-sandbox (see classification
+# service deploy). Avoids the public ALB + IP allowlist + TLS overhead.
+# Empty `defaultWorkspace` means we rely on the inbound ClaimCheck.tenantId.
+classification:
+  url: "http://classification-ui.classification-service-sandbox.svc.cluster.local"
+  timeoutSec: 30
+  defaultWorkspace: "wks-ui-001"
+
 logging:
   format: json
   level: debug

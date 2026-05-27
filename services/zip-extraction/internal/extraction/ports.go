@@ -51,6 +51,25 @@ type Retrier interface {
 	Do(ctx context.Context, op func(ctx context.Context) error) error
 }
 
+// Classifier is the port for the optional per-entry classification hop.
+// Stamped onto EntryOutcome.Classification when present; nil-safe to omit.
+//
+// Best-effort by contract: the orchestrator MUST treat any error as non-fatal
+// for the parent archive — extraction's primary contract (children written +
+// slipsheet emitted) is independent of classification availability.
+type Classifier interface {
+	Classify(ctx context.Context, req ClassifyRequest) (*Classification, error)
+}
+
+// ClassifyRequest is the input to Classifier.Classify for one entry.
+type ClassifyRequest struct {
+	WorkspaceID        string
+	Filename           string
+	ContentType        string
+	ParentArchiveDepth int
+	Body               io.Reader
+}
+
 // Metrics is the port for emitting the FR-13.2 + operational metrics.
 type Metrics interface {
 	EntryProcessed(status string)
@@ -61,6 +80,8 @@ type Metrics interface {
 	PartialFailure()
 	RedeliverySkip()
 	SlipsheetWriteFailure()
+	ClassificationSuccess(category string)
+	ClassificationFailure(reason string)
 }
 
 // Logger is re-exported to keep extraction's consumer-defined-port surface
@@ -74,6 +95,8 @@ type Clock interface {
 }
 
 // Dependencies is the dependency-injection root for extraction.Service.
+//
+// Classifier is optional — nil means no classification hop is invoked.
 type Dependencies struct {
 	Downloader      S3Downloader
 	Uploader        S3Uploader
@@ -82,6 +105,7 @@ type Dependencies struct {
 	BombChecker     BombChecker
 	PathValidator   PathValidator
 	Retrier         Retrier
+	Classifier      Classifier
 	Metrics         Metrics
 	Logger          Logger
 	Clock           Clock
@@ -91,10 +115,11 @@ type Dependencies struct {
 // ExtractionConfig holds tunables that the orchestrator consumes directly
 // (not via ports).
 type ExtractionConfig struct {
-	MaxExtractionDurationSec int
-	StagingBucket            string
-	SSEMode                  string
-	SSEKMSKeyID              string
+	MaxExtractionDurationSec        int
+	StagingBucket                   string
+	SSEMode                         string
+	SSEKMSKeyID                     string
+	ClassificationFallbackWorkspace string
 }
 
 // SystemClock is the production Clock implementation.
