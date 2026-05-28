@@ -75,7 +75,7 @@
 <body>
   <header>
     <h1>zip-extraction test harness</h1>
-    <span class="sub">developer-only — talks to LocalStack + the local service</span>
+    <span class="sub" id="harness-sub">developer-only</span>
   </header>
 
   <main>
@@ -121,13 +121,23 @@
     <section class="full">
       <div class="panel-head">
         <h2>Past extractions <span style="color: var(--muted); font-size: 11px; text-transform: none; letter-spacing: 0;">— newest first, max 50</span></h2>
-        <span class="live" id="runs-updated">—</span>
+        <div style="display: flex; gap: 12px; align-items: center;">
+          <span class="live" id="runs-updated">—</span>
+          <button id="runs-clear" type="button" style="padding: 4px 10px; font-size: 11px; background: transparent; color: var(--err); border: 1px solid var(--err);">Clear all</button>
+        </div>
       </div>
       <table class="runs-table">
         <thead><tr><th>Exec id</th><th>Source archive</th><th>Tenant</th><th>Size</th><th>Children</th><th>Classification</th><th>Status</th><th>Written at</th><th>Failure reason</th></tr></thead>
         <tbody id="runs-tbody"><tr><td colspan="9" class="muted">loading…</td></tr></tbody>
       </table>
-      <div class="muted" style="font-size: 11px; margin-top: 8px;">Click a row to load that run into the Result panel below.</div>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+        <div class="muted" style="font-size: 11px;">Click a row to load that run into the Result panel below.</div>
+        <div id="runs-pager" style="display: none; gap: 8px; align-items: center; font-size: 11px;">
+          <button id="runs-prev" type="button" style="padding: 4px 10px; font-size: 11px; background: var(--panel2); color: var(--text); border: 1px solid var(--border);">‹ Prev</button>
+          <span id="runs-page-info" class="muted"></span>
+          <button id="runs-next" type="button" style="padding: 4px 10px; font-size: 11px; background: var(--panel2); color: var(--text); border: 1px solid var(--border);">Next ›</button>
+        </div>
+      </div>
     </section>
 
     <section id="config-panel">
@@ -160,7 +170,7 @@
         <div id="progress-text" class="mono" style="font-size: 11px; margin-top: 4px; color: var(--muted);"></div>
       </div>
 
-      <h2 style="margin-top: 24px;">LocalStack target</h2>
+      <h2 style="margin-top: 24px;" id="target-heading">Target</h2>
       <div id="cfg-lines"></div>
     </section>
 
@@ -223,6 +233,11 @@ async function loadConfig() {
     const cfg = await fetch("/api/config").then(r => r.json());
     maxArchiveBytes = cfg.maxArchiveBytes || 0;
     $("max-archive-hint").textContent = "(env limit: " + (maxArchiveBytes ? humanSize(maxArchiveBytes) : "unset") + ")";
+    const isLocal = !!cfg.endpointUrl;
+    $("harness-sub").textContent = isLocal
+      ? "developer-only — talks to LocalStack + the local service"
+      : "developer-only — talks to AWS + the local service";
+    $("target-heading").textContent = isLocal ? "LocalStack target" : "AWS target";
     $("cfg-lines").innerHTML = [
       `<div class="config-line">endpoint: <code>${cfg.endpointUrl || "(default AWS)"}</code></div>`,
       `<div class="config-line">region: <code>${cfg.region}</code></div>`,
@@ -472,35 +487,87 @@ function loadRunIntoResult(execId) {
   pollResult(execId);
 }
 
+const RUNS_PER_PAGE = 10;
+let runsCache = [];
+let runsPage = 1;
+
+function renderRunsPage() {
+  const tbody = $("runs-tbody");
+  const pager = $("runs-pager");
+  if (!runsCache.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="muted">(no past runs yet)</td></tr>';
+    pager.style.display = "none";
+    return;
+  }
+  const totalPages = Math.max(1, Math.ceil(runsCache.length / RUNS_PER_PAGE));
+  if (runsPage > totalPages) runsPage = totalPages;
+  const start = (runsPage - 1) * RUNS_PER_PAGE;
+  const slice = runsCache.slice(start, start + RUNS_PER_PAGE);
+  tbody.innerHTML = slice.map(r => `
+    <tr data-exec="${r.execId}">
+      <td class="mono">${r.execId}</td>
+      <td class="mono">${r.sourceArchive || ""}</td>
+      <td class="mono">${r.tenantId || "—"}</td>
+      <td class="mono">${humanSize(r.sourceSizeBytes)}</td>
+      <td class="mono">${r.childCount}</td>
+      <td class="mono">${r.classificationSummary || "—"}</td>
+      <td><span class="badge ${r.status || ""}">${r.status || ""}</span></td>
+      <td class="mono">${r.writtenAt || ""}</td>
+      <td style="color: var(--warn); font-size: 11px;">${r.failureReason || ""}</td>
+    </tr>
+  `).join("");
+  tbody.querySelectorAll("tr[data-exec]").forEach(tr => {
+    tr.addEventListener("click", () => loadRunIntoResult(tr.dataset.exec));
+  });
+  pager.style.display = totalPages > 1 ? "flex" : "none";
+  $("runs-page-info").textContent = `page ${runsPage} of ${totalPages} · ${runsCache.length} run(s)`;
+  $("runs-prev").disabled = runsPage <= 1;
+  $("runs-next").disabled = runsPage >= totalPages;
+}
+
 async function pollRuns() {
   try {
     const data = await fetch("/api/runs").then(r => r.json());
-    const tbody = $("runs-tbody");
-    if (!data.runs || data.runs.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="9" class="muted">(no past runs yet)</td></tr>';
-    } else {
-      tbody.innerHTML = data.runs.map(r => `
-        <tr data-exec="${r.execId}">
-          <td class="mono">${r.execId}</td>
-          <td class="mono">${r.sourceArchive || ""}</td>
-          <td class="mono">${r.tenantId || "—"}</td>
-          <td class="mono">${humanSize(r.sourceSizeBytes)}</td>
-          <td class="mono">${r.childCount}</td>
-          <td class="mono">${r.classificationSummary || "—"}</td>
-          <td><span class="badge ${r.status || ""}">${r.status || ""}</span></td>
-          <td class="mono">${r.writtenAt || ""}</td>
-          <td style="color: var(--warn); font-size: 11px;">${r.failureReason || ""}</td>
-        </tr>
-      `).join("");
-      tbody.querySelectorAll("tr[data-exec]").forEach(tr => {
-        tr.addEventListener("click", () => loadRunIntoResult(tr.dataset.exec));
-      });
-    }
-    $("runs-updated").textContent = "updated " + new Date().toLocaleTimeString() + " · " + (data.runs ? data.runs.length : 0) + " run(s)";
+    runsCache = data.runs || [];
+    renderRunsPage();
+    $("runs-updated").textContent = "updated " + new Date().toLocaleTimeString() + " · " + runsCache.length + " run(s)";
   } catch (e) {
     $("runs-updated").textContent = "runs endpoint error: " + e.message;
   }
 }
+
+$("runs-prev").addEventListener("click", () => { if (runsPage > 1) { runsPage--; renderRunsPage(); } });
+$("runs-next").addEventListener("click", () => {
+  const totalPages = Math.max(1, Math.ceil(runsCache.length / RUNS_PER_PAGE));
+  if (runsPage < totalPages) { runsPage++; renderRunsPage(); }
+});
+
+$("runs-clear").addEventListener("click", async () => {
+  if (!confirm("Delete every past extraction (slipsheets, child files, source ZIPs, DynamoDB rows)?\n\nThis cannot be undone.")) return;
+  const btn = $("runs-clear");
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "clearing…";
+  try {
+    const r = await fetch("/api/clear-runs", { method: "POST" });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      alert("clear failed: " + (data.error || r.statusText));
+    } else {
+      runsCache = [];
+      runsPage = 1;
+      renderRunsPage();
+      pollRuns();
+      pollQueue();
+      $("runs-updated").textContent = `cleared ${data.deletedStagingObjects||0} staging + ${data.deletedSourceObjects||0} source + ${data.deletedDdbRows||0} ddb`;
+    }
+  } catch (e) {
+    alert("clear error: " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+});
 
 loadConfig();
 pollMetrics(true);

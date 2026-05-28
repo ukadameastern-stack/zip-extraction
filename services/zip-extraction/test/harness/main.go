@@ -31,6 +31,7 @@ import (
 	awsddb "github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	awssqs "github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
@@ -106,6 +107,7 @@ func main() {
 	mux.HandleFunc("/api/config", srv.handleConfig)
 	mux.HandleFunc("/api/queue", srv.handleQueue)
 	mux.HandleFunc("/api/runs", srv.handleRuns)
+	mux.HandleFunc("/api/clear-runs", srv.handleClearRuns)
 
 	log.Printf("zip-extraction harness listening on %s", c.listenAddr)
 	log.Printf("  endpoint:        %s", c.endpointURL)
@@ -493,6 +495,130 @@ func (s *server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		runs = append(runs, summary)
 	}
 	writeJSON(w, http.StatusOK, runsResp{Runs: runs})
+}
+
+type clearResp struct {
+	DeletedStagingObjects int    `json:"deletedStagingObjects"`
+	DeletedSourceObjects  int    `json:"deletedSourceObjects"`
+	DeletedDdbRows        int    `json:"deletedDdbRows"`
+	Error                 string `json:"error,omitempty"`
+}
+
+// handleClearRuns wipes every artefact the past-extractions table reads from:
+// slipsheets, per-exec child files, source ZIPs, and PIPELINE# DDB rows. There
+// is no undo. Dev-only — the harness has no auth.
+func (s *server) handleClearRuns(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+		http.Error(w, "POST or DELETE required", http.StatusMethodNotAllowed)
+		return
+	}
+	ctx := r.Context()
+	resp := clearResp{}
+
+	for _, p := range []string{"slipsheets/", "input/"} {
+		n, err := s.deleteS3Prefix(ctx, s.cfg.stagingBucket, p)
+		resp.DeletedStagingObjects += n
+		if err != nil {
+			resp.Error = "staging " + p + ": " + err.Error()
+			writeJSON(w, http.StatusInternalServerError, resp)
+			return
+		}
+	}
+
+	n, err := s.deleteS3Prefix(ctx, s.cfg.sourceBucket, "uploads/")
+	resp.DeletedSourceObjects = n
+	if err != nil {
+		resp.Error = "source uploads/: " + err.Error()
+		writeJSON(w, http.StatusInternalServerError, resp)
+		return
+	}
+
+	n, err = s.deletePipelineDdbRows(ctx)
+	resp.DeletedDdbRows = n
+	if err != nil {
+		resp.Error = "ddb: " + err.Error()
+		writeJSON(w, http.StatusInternalServerError, resp)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *server) deleteS3Prefix(ctx context.Context, bucket, prefix string) (int, error) {
+	deleted := 0
+	var token *string
+	for {
+		listOut, err := s.s3.ListObjectsV2(ctx, &awss3.ListObjectsV2Input{
+			Bucket:            aws.String(bucket),
+			Prefix:            aws.String(prefix),
+			ContinuationToken: token,
+		})
+		if err != nil {
+			return deleted, err
+		}
+		if len(listOut.Contents) > 0 {
+			ids := make([]s3types.ObjectIdentifier, 0, len(listOut.Contents))
+			for _, o := range listOut.Contents {
+				ids = append(ids, s3types.ObjectIdentifier{Key: o.Key})
+			}
+			if _, err := s.s3.DeleteObjects(ctx, &awss3.DeleteObjectsInput{
+				Bucket: aws.String(bucket),
+				Delete: &s3types.Delete{Objects: ids, Quiet: aws.Bool(true)},
+			}); err != nil {
+				return deleted, err
+			}
+			deleted += len(ids)
+		}
+		if listOut.IsTruncated == nil || !*listOut.IsTruncated {
+			return deleted, nil
+		}
+		token = listOut.NextContinuationToken
+	}
+}
+
+func (s *server) deletePipelineDdbRows(ctx context.Context) (int, error) {
+	deleted := 0
+	var lastKey map[string]ddbtypes.AttributeValue
+	for {
+		scanOut, err := s.ddb.Scan(ctx, &awsddb.ScanInput{
+			TableName:        aws.String(s.cfg.dynamoTable),
+			FilterExpression: aws.String("begins_with(pk, :p)"),
+			ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{
+				":p": &ddbtypes.AttributeValueMemberS{Value: "PIPELINE#"},
+			},
+			ExclusiveStartKey: lastKey,
+		})
+		if err != nil {
+			return deleted, err
+		}
+		for i := 0; i < len(scanOut.Items); i += 25 {
+			end := i + 25
+			if end > len(scanOut.Items) {
+				end = len(scanOut.Items)
+			}
+			reqs := make([]ddbtypes.WriteRequest, 0, end-i)
+			for _, item := range scanOut.Items[i:end] {
+				reqs = append(reqs, ddbtypes.WriteRequest{
+					DeleteRequest: &ddbtypes.DeleteRequest{
+						Key: map[string]ddbtypes.AttributeValue{
+							"pk": item["pk"],
+							"sk": item["sk"],
+						},
+					},
+				})
+			}
+			if _, err := s.ddb.BatchWriteItem(ctx, &awsddb.BatchWriteItemInput{
+				RequestItems: map[string][]ddbtypes.WriteRequest{s.cfg.dynamoTable: reqs},
+			}); err != nil {
+				return deleted, err
+			}
+			deleted += len(reqs)
+		}
+		if len(scanOut.LastEvaluatedKey) == 0 {
+			return deleted, nil
+		}
+		lastKey = scanOut.LastEvaluatedKey
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, body interface{}) {
