@@ -183,7 +183,7 @@ See `deploy/config-local.yaml` for the canonical default values.
 - `GET /healthz/ready` — readiness; 200 iff AWS reachability passed AND not draining
 - `GET /metrics` — Prometheus exposition
 
-Eight emitted metrics (see `internal/metrics/metrics.go`):
+Ten emitted metrics (see `internal/metrics/metrics.go`):
 - `zip_entries_total{status}` (counter)
 - `zip_extraction_duration_seconds{outcome}` (histogram)
 - `zip_extraction_failures_total{reason}` (counter)
@@ -192,6 +192,8 @@ Eight emitted metrics (see `internal/metrics/metrics.go`):
 - `partial_failures_total` (counter)
 - `redelivery_skips_total` (counter — idempotent redelivery indicator)
 - `slipsheet_write_failures_total` (counter)
+- `classification_calls_total{category}` (counter — optional classification hop)
+- `classification_failures_total{reason}` (counter — best-effort classification failures)
 
 ## Deployment
 

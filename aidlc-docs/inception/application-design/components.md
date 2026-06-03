@@ -123,7 +123,7 @@ type Heartbeater interface {
 
 **Responsibilities**:
 - Download the archive from S3 via the `S3Downloader` port (streaming, no full buffer per NFR-3.1).
-- Apply pre-extraction bomb defence (rules #1, #4 from archive metadata).
+- Apply pre-extraction bomb defence (rules #1, #4, #12 from archive metadata; rule #11 overlap-check on entry data ranges).
 - Iterate ZIP entries sequentially (FR-3.2). For each entry:
   - Reject symlinks (rule #6), absolute paths (rule #7), traversal paths (rule #8) via `validation` port.
   - Apply per-entry limits (single-file size rule #9; depth rule #5).
@@ -237,35 +237,32 @@ func (e *PermanentError) Unwrap() error
 ## 5. `internal/bombdefence`
 
 **Type**: Pure security component — no I/O, no external dependencies.
-**Purpose**: Implement the 10-point zip-bomb defence (FR-7) using deterministic checks plus the streaming `LimitedReader` (Q5).
+**Purpose**: Implement the 12-point zip-bomb defence (FR-7) using deterministic checks plus the streaming `LimitedReader` (Q5).
 
 **Responsibilities**:
-- `PreCheck(meta)` — apply rules #1 (compressed-size) and #4 (entry-count) using archive metadata only.
-- `EntryCheck(idx, name, decompressedSize)` — apply rules #5 (depth), #6 (symlink — caller signals via `name`-mode flag), #9 (single-file-size). Note rules #7 (absolute) and #8 (traversal) are delegated to `internal/validation` per Q8 separation.
-- `NewLimitedReader(r, cap, ratio)` — returns an `io.Reader` that short-circuits with `*BombDefenceError{Rule: 2}` or `{Rule: 3}` the moment cumulative bytes exceed `cap` or the running compression ratio exceeds `ratio`.
+- `PreCheck(meta)` — apply rules #1 (compressed-size), #4 (entry-count), and #12 (total-declared-uncompressed-size, untrusted — disabled when cap is 0) using archive metadata only.
+- `OverlapCheck(meta)` — apply rule #11 (Fifield defence): sort each entry's `[DataOffset, DataOffset+CompressedSize64)` range and reject overlapping compressed-data ranges before any decompression.
+- `EntryCheck(idx, entry)` — apply rules #5 (depth), #6 (symlink), #9 (single-file-size). Note rules #7 (absolute) and #8 (traversal) are delegated to `internal/validation` per Q8 separation.
+- `NewLimitedReader(r, compressedSize)` — returns an `io.Reader` that short-circuits with `*BombDefenceError{Rule: 2}` or `{Rule: 3}` the moment cumulative bytes exceed the extracted-size cap or the running compression ratio exceeds the configured ratio.
 
 **Public Interface**:
 ```go
 package bombdefence
 
-type Config struct {
-    MaxCompressedSizeBytes   int64
-    MaxExtractedSizeBytes    int64
-    MaxCompressionRatio      float64
-    MaxEntryCount            int
-    MaxDirectoryDepth        int
-    MaxSingleFileSizeBytes   int64
-    MaxExtractionDurationSec int
-}
+// Constructed from the shared config.BombDefenceConfig (8 thresholds):
+//   MaxCompressedSizeBytes, MaxExtractedSizeBytes, MaxCompressionRatio,
+//   MaxEntryCount, MaxDirectoryDepth, MaxSingleFileSizeBytes,
+//   MaxExtractionDurationSec, MaxTotalDeclaredUncompressedBytes
 
 type Checker struct { /* unexported */ }
-func New(cfg Config) *Checker
-func (c *Checker) PreCheck(meta extraction.ArchiveMetadata) error
-func (c *Checker) EntryCheck(entryIndex int, name string, decompressedSize int64) error
-func (c *Checker) NewLimitedReader(r io.Reader, compressedSize int64) io.Reader
+func New(cfg config.BombDefenceConfig) *Checker
+func (c *Checker) PreCheck(meta extraction.ArchiveMetadata) error      // rules #1, #4, #12
+func (c *Checker) OverlapCheck(meta extraction.ArchiveMetadata) error  // rule #11
+func (c *Checker) EntryCheck(idx int, e extraction.EntryInfo) error    // rules #5, #6, #9
+func (c *Checker) NewLimitedReader(r io.Reader, compressedSize int64) io.Reader // rules #2, #3
 ```
 
-**Owns enforcement of**: FR-7 (all 10 rules except #7, #8), Q5 (short-circuiting limiter).
+**Owns enforcement of**: FR-7 (all 12 rules except #7, #8), Q5 (short-circuiting limiter).
 
 ---
 
@@ -476,6 +473,10 @@ func (m *Metrics) ExtractionFailure(reason string)           // zip_extraction_f
 func (m *Metrics) BombRejection(rule int)                    // zip_bomb_rejections_total{rule}
 func (m *Metrics) BytesExtracted(n int64)                    // extracted_bytes_total
 func (m *Metrics) PartialFailure()                           // partial_failures_total
+func (m *Metrics) RedeliverySkip()                           // redelivery_skips_total
+func (m *Metrics) SlipsheetWriteFailure()                    // slipsheet_write_failures_total
+func (m *Metrics) ClassificationSuccess(category string)     // classification_calls_total{category}
+func (m *Metrics) ClassificationFailure(reason string)       // classification_failures_total{reason}
 ```
 
 **Owns enforcement of**: FR-13.2, SECURITY-14 (alerting hooks).

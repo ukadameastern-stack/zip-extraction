@@ -100,8 +100,9 @@ func IsPermanent(err error) (*PermanentError, bool)
 
 | Method | Signature | Purpose |
 |---|---|---|
-| `New` | `func New(cfg Config) *Checker` | Constructor. |
-| `PreCheck` | `func (c *Checker) PreCheck(meta extraction.ArchiveMetadata) error` | Rules #1 (compressed-size) + #4 (entry-count). Returns `*BombDefenceError` on violation. |
+| `New` | `func New(cfg config.BombDefenceConfig) *Checker` | Constructor. |
+| `PreCheck` | `func (c *Checker) PreCheck(meta extraction.ArchiveMetadata) error` | Rules #1 (compressed-size) + #4 (entry-count) + #12 (total-declared-uncompressed-size, untrusted; disabled when cap is 0). Returns `*BombDefenceError` on violation. |
+| `OverlapCheck` | `func (c *Checker) OverlapCheck(meta extraction.ArchiveMetadata) error` | Rule #11 (Fifield defence) — sorts entry compressed-data ranges and rejects overlaps before decompression. Returns `*BombDefenceError{Rule: 11}` on violation. |
 | `EntryCheck` | `func (c *Checker) EntryCheck(entryIndex int, entry EntryInfo) error` | Rules #5 (depth) + #6 (symlink) + #9 (single-file-size). |
 | `NewLimitedReader` | `func (c *Checker) NewLimitedReader(r io.Reader, compressedSize int64) io.Reader` | Q5 — short-circuiting wrapper enforcing rules #2 (cumulative extracted size) and #3 (compression ratio). |
 | `EntryInfo` | `type EntryInfo struct { Name string; Mode os.FileMode; CompressedSize, UncompressedSize int64 }` | Subset of `*zip.File` needed for checks (testable without the full zip type). |
@@ -241,13 +242,17 @@ It returns `(0, *BombDefenceError{Rule: 2 | 3})` the moment a threshold is cross
 
 | Method | Signature | Purpose |
 |---|---|---|
-| `New` | `func New(reg prometheus.Registerer) *Metrics` | Construct + register all 6 collectors (FR-13.2). |
+| `New` | `func New(reg prometheus.Registerer) *Metrics` | Construct + register all 10 collectors (FR-13.2 + operational + classification-hop). |
 | `EntryProcessed` | `func (m *Metrics) EntryProcessed(status string)` | `zip_entries_total{status}` |
 | `ExtractionDuration` | `func (m *Metrics) ExtractionDuration(d time.Duration, outcome string)` | `zip_extraction_duration_seconds{outcome}` (histogram) |
 | `ExtractionFailure` | `func (m *Metrics) ExtractionFailure(reason string)` | `zip_extraction_failures_total{reason}` |
 | `BombRejection` | `func (m *Metrics) BombRejection(rule int)` | `zip_bomb_rejections_total{rule}` |
 | `BytesExtracted` | `func (m *Metrics) BytesExtracted(n int64)` | `extracted_bytes_total` |
 | `PartialFailure` | `func (m *Metrics) PartialFailure()` | `partial_failures_total` |
+| `RedeliverySkip` | `func (m *Metrics) RedeliverySkip()` | `redelivery_skips_total` |
+| `SlipsheetWriteFailure` | `func (m *Metrics) SlipsheetWriteFailure()` | `slipsheet_write_failures_total` |
+| `ClassificationSuccess` | `func (m *Metrics) ClassificationSuccess(category string)` | `classification_calls_total{category}` |
+| `ClassificationFailure` | `func (m *Metrics) ClassificationFailure(reason string)` | `classification_failures_total{reason}` |
 
 ### Testable Properties (PBT-01)
 

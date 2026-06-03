@@ -1215,3 +1215,29 @@ Verification:
 - `bin/helm template chart -f chart/values.yaml` — confirmed the new `maxTotalDeclaredUncompressedBytes:` line renders into the ConfigMap (alongside the existing big-int fields, all of which render in scientific notation through helm's text/template; the YAML parser in the service handles that — established behavior, not a regression of this change).
 
 **Context**: Defence-in-depth completion of the user's operations checklist (6 of 6 items now actively enforced). The 12-rule defence is now consistent with the docs: rules 1, 4, 12 are aggregate pre-stream (PreCheck); 5, 6, 9 are per-entry pre-stream (EntryCheck); 7, 8 are path-validation (delegated); 11 is overlap-pre-stream (OverlapCheck); 2, 3 are streaming (LimitedReader); 10 is wall-clock (orchestrator).
+
+---
+
+## Doc reconciliation to code (post-delivery design-doc sync)
+**Timestamp**: 2026-06-03T00:00:00Z
+**User Input**: "Cna you update aidlc doc ?" → (clarified) "I want you to understand code and features and update aidlc doc according to it"
+**AI Response**: Performed a read-only inventory of the implemented service (`services/zip-extraction`) via an Explore agent + direct reads, then reconciled the AI-DLC design docs to match the code. No code was changed; only documentation. Drift found and fixed:
+
+1. **Bomb-defence rule count 10 → 12.** Rules #11 (`OverlapCheck`, Fifield) and #12 (`PreCheck` total-declared-uncompressed cap) were already implemented and already had `BR-BOMB-009`/`BR-BOMB-010` statements, but every *summary count* across the design docs still said 10. Updated:
+   - `construction/zip-extraction/functional-design/business-rules.md` — category-table header "rules #1 – #10" → "#1 – #12".
+   - `construction/zip-extraction/functional-design/business-logic-model.md` — top-level state machine now shows `OverlapChecking` between PreChecking and Iterating; "10 bomb-defence rules / three stages" → "12 rules / six stages"; PreCheck row gains #12, new Overlap-check row added for #11; rationale paragraphs added for #11/#12.
+   - `construction/zip-extraction/nfr-design/logical-components.md` — "all 10 rules" → "all 12", "7 thresholds" → "8 thresholds".
+   - `construction/zip-extraction/nfr-requirements/nfr-requirements.md` — "10-rule defence" → "12-rule defence" (NFR-Z-048).
+   - `inception/application-design/application-design.md` — component-table row 5 "10-rule defence" → "12-rule defence (incl. #11, #12)".
+   - `inception/application-design/components.md` — orchestrator responsibility (rules #1,#4 → #1,#4,#12 + #11 overlap); bombdefence Purpose "10-point" → "12-point", `OverlapCheck` responsibility + interface added, `New` signature → `config.BombDefenceConfig`, "all 10 rules except #7,#8" → "all 12 …".
+   - `inception/application-design/component-methods.md` — `PreCheck` row gains #12, new `OverlapCheck` row, `New` signature updated.
+   - `inception/requirements/requirements.md` — FR-7 title "10-Point" → "12-Point", added rows #11/#12, added FR-7.3, noted as-delivered defaults (rule #1 500 MB → 5 GB), and the bombdefence tree comment "(10 rules)" → "(12 rules)".
+   - `inception/plans/execution-plan.md` — two "10-rule/10-point" → "12".
+   - `construction/zip-extraction/code/group-c.md` — bombdefence row now lists `PreCheck (#1,#4,#12)` + `OverlapCheck (#11)`.
+   - Left untouched (correct as-is): all `PBT-01..10` references (that is the property-test count, not the bomb-rule count) and the dated `*-plan.md` checklist items (historical execution records).
+
+2. **Metrics count 8 → 10.** Code emits two classification-hop counters (`classification_calls_total{category}`, `classification_failures_total{reason}`; methods `ClassificationSuccess`/`ClassificationFailure`) that no design doc listed. Updated `nfr-design/nfr-design-patterns.md` §5.1, `application-design/components.md` (Metrics interface), `application-design/component-methods.md` (Metrics table, "6 collectors" → "10"), and the service `README.md` ("Eight emitted metrics" → "Ten").
+
+3. **aidlc-state.md** — added a "Post-Delivery Feature Evolution" section recording the 10→12 bomb rules, the optional classification hop, the 8→10 metrics, and the developer test harness, all dated and cross-referenced.
+
+**Context**: Documentation-only reconciliation requested by the user. Source of truth was the code under `services/zip-extraction`; the README was already current on the 12-rule count but stale on the metric count. No workflow stage was re-entered; this is a maintenance sync of the AI-DLC artefacts to the as-built system.

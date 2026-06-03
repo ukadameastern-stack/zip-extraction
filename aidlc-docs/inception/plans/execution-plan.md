@@ -140,7 +140,7 @@ flowchart TD
 
 | Stage | Status | Rationale |
 |---|---|---|
-| Functional Design | 🟠 **EXECUTE** | Non-trivial business logic: 10-rule bomb-defence state machine evaluated incrementally during streaming, path-validation algorithm, SUCCESS/PARTIAL_FAILED/FAILED state transitions, classifier-driven retry policy, slipsheet serialization. New data models (DynamoDB record, slipsheet JSON, SQS message). PBT-01 mandates property identification during this stage. |
+| Functional Design | 🟠 **EXECUTE** | Non-trivial business logic: 12-rule bomb-defence state machine evaluated incrementally during streaming, path-validation algorithm, SUCCESS/PARTIAL_FAILED/FAILED state transitions, classifier-driven retry policy, slipsheet serialization. New data models (DynamoDB record, slipsheet JSON, SQS message). PBT-01 mandates property identification during this stage. |
 | NFR Requirements | 🟠 **EXECUTE** | Performance bounds (P95 latency, memory cap), security baseline (all 15 SECURITY rules), scalability concerns (max-in-flight, multipart upload), tech stack selection (Go 1.24, AWS SDK v2, zap, rapid, prometheus) all need formal capture. PBT-09 requires framework selection in this stage. |
 | NFR Design | 🟠 **EXECUTE** | NFR Requirements is executing, so NFR Design follows naturally to translate NFRs into concrete patterns: structured-logging schema, metrics taxonomy, retry/backoff implementation, secrets handling (IRSA), TLS/HTTPS posture for AWS SDK calls. |
 | Infrastructure Design | 🟠 **EXECUTE** | Helm chart design (5 templates), ConfigMap shape, ServiceAccount + IRSA annotation pattern, S3 bucket policy posture (deny non-TLS), SQS queue + DLQ redrive configuration, DynamoDB table key schema all need explicit design. |
@@ -180,7 +180,7 @@ Estimates assume continuous user availability for approval gates between stages.
 ## 6. Success Criteria
 
 ### Primary Goal
-Deliver a production-ready, memory-bounded, security-hardened Go microservice that consumes ZIP-extraction jobs from SQS, performs streaming decompression with 10-point bomb-defence, uploads child entries to S3, persists per-entry DynamoDB records, generates parent slipsheets, and fans out via S3 PutObject events.
+Deliver a production-ready, memory-bounded, security-hardened Go microservice that consumes ZIP-extraction jobs from SQS, performs streaming decompression with 12-point bomb-defence, uploads child entries to S3, persists per-entry DynamoDB records, generates parent slipsheets, and fans out via S3 PutObject events.
 
 ### Key Deliverables
 1. Go application code under `services/zip-extraction/` (cmd + ~10 internal packages)

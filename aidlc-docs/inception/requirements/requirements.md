@@ -120,14 +120,14 @@ Both opt-in extensions are **enabled** (see audit.md timestamps). Their full rul
   - after normalisation, escapes the entry's intended staging prefix.
 - FR-6.2 Rejection of an unsafe path SHALL fail the entire archive (status = FAILED) and emit a structured log entry classifying the violation.
 
-### FR-7. 10-Point Zip Bomb Defence
-**Source**: §11
+### FR-7. 12-Point Zip Bomb Defence
+**Source**: §11 (rules #1–#10); rules #11 and #12 added as defence-in-depth during operations (see `BR-BOMB-009`/`BR-BOMB-010`).
 
-The service SHALL enforce all ten defence rules. Default thresholds are the spec's recommended limits; each threshold SHALL be configurable via the YAML config file (NFR-7).
+The service SHALL enforce all twelve defence rules. Default thresholds are configurable via the YAML config file (NFR-7); the table below shows the **as-delivered** defaults (some diverge from the original spec recommendations — e.g. rule #1 was raised from 500 MB to 5 GB during operations to support legitimate large archives, with rule #2 remaining the binding extracted-size ceiling).
 
 | # | Rule | Default Limit | Action on violation |
 |---|------|---------------|---------------------|
-| 1 | Max compressed archive size | 500 MB | Reject archive, FAILED |
+| 1 | Max compressed archive size | 5 GB | Reject archive, FAILED |
 | 2 | Max extracted size (cumulative) | 2 GB | Reject archive, FAILED |
 | 3 | Max compression ratio | 1000× | Reject archive, FAILED |
 | 4 | Max entry count | 10,000 | Reject archive, FAILED |
@@ -137,9 +137,12 @@ The service SHALL enforce all ten defence rules. Default thresholds are the spec
 | 8 | Reject path traversal (`../`) | n/a | Reject archive, FAILED |
 | 9 | Max single file size (decompressed) | 250 MB | Reject archive, FAILED |
 | 10 | Max extraction duration | 240 s | Abort extraction, FAILED |
+| 11 | Reject overlapping compressed-data ranges (Fifield non-recursive bomb) | n/a | Reject archive, FAILED |
+| 12 | Max total declared uncompressed size (untrusted pre-stream cap) | 50 GB (0 disables) | Reject archive, FAILED |
 
 - FR-7.1 Bomb-defence violations SHALL NOT be retried (they are deterministic failures); the SQS message SHALL be deleted after recording the rejection in DynamoDB and emitting the `zip_bomb_rejections_total` metric.
 - FR-7.2 Rule #2 (cumulative extracted size) and Rule #3 (compression ratio) SHALL be evaluated **incrementally** during streaming — extraction MUST abort as soon as a violation is detected, NOT after full decompression.
+- FR-7.3 Rule #11 (overlap-check) and rule #12 (declared-total cap) SHALL be evaluated pre-stream from central-directory metadata, before any decompression work begins. Rule #12 uses untrusted declared sizes, so it is a cheap supplement to — not a replacement for — the authoritative streaming cap (rule #2).
 
 ### FR-8. Parent Archive Slipsheet
 **Source**: §15, Q7
@@ -359,7 +362,7 @@ services/zip-extraction/
 │   └── zip-extraction/main.go
 ├── internal/
 │   ├── extraction/        # ProcessMessage, ExtractEntries
-│   ├── bombdefence/       # CheckBombDefence (10 rules)
+│   ├── bombdefence/       # CheckBombDefence (12 rules)
 │   ├── storage/           # S3 upload (multipart-aware)
 │   ├── dynamodb/          # CreatePipelineRecord (idempotent)
 │   ├── slipsheet/         # GenerateSlipSheet
