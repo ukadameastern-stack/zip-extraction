@@ -18,6 +18,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  statuses: write   # TEMP(debug): surface the failing test via a commit status
 
 jobs:
   build-test-vuln:
@@ -65,7 +66,32 @@ jobs:
         # shutdown) flaky on shared CI runners. This matches the sibling
         # office-conversion-service-demo gate. Race detection still runs locally
         # via `make test` (and can be added as a dedicated non-blocking job later).
-        run: go test -coverpkg=./internal/... -coverprofile=cover.out ./...
+        run: |
+          set -o pipefail
+          go test -v -coverpkg=./internal/... -coverprofile=cover.out ./... 2>&1 | tee /tmp/test.log
+
+      # TEMP(debug): the job log isn't readable without auth, so when the test
+      # step fails we surface the failing lines two ways — the full tail into the
+      # job summary (for humans), and a compact first-failure line into a commit
+      # status (readable via the public API). Remove this step once CI is green.
+      - name: surface test failure (debug)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo '## test failure (debug capture)';
+            echo '```';
+            grep -nE '^--- FAIL|^=== RUN|^    .*\.go:[0-9]+:|panic:|FAIL\b|undefined:|cannot use|^# ' /tmp/test.log | tail -n 250 || true;
+            echo '```';
+          } >> "$GITHUB_STEP_SUMMARY" || true
+          DESC=$(grep -nE '^--- FAIL|panic:|undefined:|cannot use|^# [^ ]|\.go:[0-9]+:' /tmp/test.log | head -3 | tr '\n' ' ')
+          DESC=$(printf '%s' "$DESC" | cut -c1-130)
+          [ -z "$DESC" ] && DESC="$(tail -n 1 /tmp/test.log | cut -c1-130)"
+          BODY=$(python3 -c "import json,sys;print(json.dumps({'state':'failure','context':'debug/first-fail','description':sys.argv[1] or 'no-line'}))" "$DESC")
+          curl -s -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" -d "$BODY" >/dev/null
+          echo "posted commit status: $DESC"
 
       - name: coverage gate (>=80%)
         run: |
