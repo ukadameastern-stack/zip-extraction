@@ -41,8 +41,44 @@ Helm release `zip-extraction-dev05` rendered from `chart/` with overlay `chart/v
 | Namespace                    | `zip-extraction-dev05` |
 | Deployment                   | `zip-extraction-dev05` (replicaCount=1 for DEV05) |
 | Service (ClusterIP)          | `zip-extraction-dev05` (port 8080) |
-| ServiceAccount               | `zip-extraction` (annotated with the IAM role ARN for IRSA) |
+| ServiceAccount               | `zip-extraction` (annotated with the IAM role ARN for IRSA; shared by the service and the harness) |
 | ConfigMap                    | `zip-extraction-dev05` (bombDefence / streaming / retry / sqs / classification tunables) |
+| Deployment (harness)         | `zip-extraction-dev05-harness` (`harness.enabled: true` in the DEV05 overlay) |
+| Service (harness, ClusterIP) | `zip-extraction-dev05-harness` (port 80 → targetPort 9000) |
+| Ingress (harness, ALB)       | `zip-extraction-dev05-harness` (internet-facing — see "Inbound path" below) |
+
+### Inbound path — developer harness (public, IP-allowlisted)
+
+DEV05 is the only environment that sets `harness.enabled: true`, so the chart
+also stands up a developer test harness reachable from the **public internet**,
+restricted by an IP allowlist. This is the only public entry point in the
+DEV05 topology — the service itself is never exposed outside the cluster.
+
+```text
+Developer browser (allowlisted CIDRs only)
+    │  http://zip-extraction-dev-sandbox-v1.dev05.k8s.opus2dev.com
+    ▼
+Route 53 A-alias ─► internet-facing ALB (HTTP:80) ─► Ingress ─► Service (80→9000) ─► harness pod
+                     IP allowlist via alb.ingress.kubernetes.io/inbound-cidrs
+```
+
+The harness submits ZIPs to the uploads bucket and sends ClaimChecks to SQS
+using the **same IRSA identity** as the service (ServiceAccount `zip-extraction`)
+— no extra IAM. From there messages flow through the normal data plane
+(SQS → service → staging S3 + DynamoDB).
+
+| Kind | Name / value | Notes |
+|---|---|---|
+| Ingress annotations | `kubernetes.io/ingress.class: alb`, `scheme: internet-facing`, `target-type: ip`, listen HTTP:80, healthcheck `/api/config` | from `chart/templates/harness-ingress.yaml` |
+| IP allowlist | `alb.ingress.kubernetes.io/inbound-cidrs` (~14 CIDRs) | values live in `chart/values-dev05.yaml` (`harness.ingress.inboundCidrs`) |
+| ALB (AWS) | provisioned by the cluster's AWS Load Balancer Controller from the Ingress | NOT created by `bootstrap-aws.sh`; deleted automatically when the Ingress is removed at teardown |
+| Route 53 record | A-alias `zip-extraction-dev-sandbox-v1.dev05.k8s.opus2dev.com` → ALB DNS | created by `route53-bind.sh` once the ALB appears; recorded under `.route53` in `state.json`; removed by `route53-unbind.sh` |
+
+The ALB and the Route 53 record are the only DEV05 resources not written by
+`bootstrap-aws.sh`: the ALB is reconciled by the in-cluster LB controller, and
+the DNS record is written by `route53-bind.sh`. This is why `undeploy-dev05`
+runs `route53-unbind` **first** (before the Helm uninstall that deletes the
+Ingress and, with it, the ALB the record points at).
 
 ### Cross-namespace dependency: classification service
 
@@ -61,8 +97,8 @@ After each child is uploaded to staging, the service POSTs it to the classificat
 ## Targets
 
 ```
-make deploy-dev05       # full bootstrap: install helm + AWS resources + image push + helm install
-make undeploy-dev05     # reverse, in safe order: helm uninstall → ns delete → SQS/S3/DDB/IAM
+make deploy-dev05       # full bootstrap: helm install + AWS resources + image push + helm deploy + Route 53 bind
+make undeploy-dev05     # reverse, in safe order: Route 53 unbind → helm uninstall → ns delete → SQS/S3/DDB/IAM
 make list-dev05         # show what's deployed (state.json + live AWS/K8s checks)
 ```
 
@@ -73,6 +109,8 @@ make dev05-helm-install   # install helm v3 to ./bin/helm if missing
 make dev05-bootstrap      # AWS resources only (writes state.json)
 make dev05-push           # docker build + push, captures image digest into state.json
 make dev05-helm-deploy    # helm upgrade --install (requires state.json with image+iam already populated)
+make dev05-route53-bind   # wait for the harness ALB, then UPSERT the Route 53 A-alias (writes .route53 to state.json)
+make dev05-route53-unbind # delete the Route 53 record from state.json (call BEFORE teardown-k8s removes the ALB)
 make dev05-teardown-k8s   # helm uninstall + delete namespace (call BEFORE teardown-aws)
 make dev05-teardown-aws   # delete AWS resources listed in state.json
 ```
