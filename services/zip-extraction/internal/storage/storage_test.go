@@ -201,7 +201,7 @@ func TestUpload_UploaderErrorWraps(t *testing.T) {
 // throttlingErr satisfies smithy.APIError so retry.AsTransient classifies it.
 type throttlingErr struct{}
 
-func (throttlingErr) Error() string                  { return "SlowDown" }
-func (throttlingErr) ErrorCode() string              { return "SlowDown" }
-func (throttlingErr) ErrorMessage() string           { return "slow" }
-func (throttlingErr) ErrorFault() smithy.ErrorFault  { return smithy.FaultServer }
+func (throttlingErr) Error() string                 { return "SlowDown" }
+func (throttlingErr) ErrorCode() string             { return "SlowDown" }
+func (throttlingErr) ErrorMessage() string          { return "slow" }
+func (throttlingErr) ErrorFault() smithy.ErrorFault { return smithy.FaultServer }

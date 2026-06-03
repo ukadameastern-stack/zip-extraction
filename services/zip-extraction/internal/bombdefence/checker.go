@@ -163,9 +163,8 @@ type limitedReader struct {
 	entryCompressedSz  int64
 	smallSampleFloorSz int64
 
-	extracted    int64
-	cumulativeCS int64 // cumulative compressed bytes (accumulated externally; see Note)
-	errSticky    error
+	extracted int64
+	errSticky error
 }
 
 // Read implements io.Reader. On a bomb-defence violation, Read returns

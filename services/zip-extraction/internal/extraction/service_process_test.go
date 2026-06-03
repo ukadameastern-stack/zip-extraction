@@ -426,7 +426,7 @@ type slowUploader struct {
 	delay time.Duration
 }
 
-func (s *slowUploader) Upload(ctx context.Context, _ string, _ string, body io.Reader, _ int64, _ string) error {
+func (s *slowUploader) Upload(ctx context.Context, _, _ string, body io.Reader, _ int64, _ string) error {
 	_, _ = io.Copy(io.Discard, body)
 	select {
 	case <-ctx.Done():

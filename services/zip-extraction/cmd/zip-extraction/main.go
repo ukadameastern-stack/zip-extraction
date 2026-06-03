@@ -63,7 +63,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer logger.Sync()
+	defer func() { _ = logger.Sync() }() // Sync on stderr/stdout commonly errors; nothing actionable
 	logger.Info("starting",
 		zap.String("version", version),
 		zap.String("region", cfg.Infra.Region),
@@ -94,6 +94,7 @@ func run() error {
 	// 7. Domain components (no I/O).
 	checker := bombdefence.New(cfg.BombDefence)
 	pathValidator := validation.New()
+	// #nosec G404 -- RNG seeds only retry-backoff jitter (BR-RETRY-003); not security-sensitive.
 	retrier := retry.New(cfg.Retry, extraction.SystemClock{}, rand.New(rand.NewSource(time.Now().UnixNano())), logger)
 
 	// 8. Adapters.

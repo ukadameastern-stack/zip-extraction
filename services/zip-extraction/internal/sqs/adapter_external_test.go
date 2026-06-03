@@ -24,11 +24,10 @@ import (
 type fakeSQSAPI struct {
 	mu sync.Mutex
 
-	receiveBatches  [][]sqstypes.Message
-	deleteCalls     atomic.Int32
-	heartbeatCalls  atomic.Int32
-	receiveCalls    atomic.Int32
-	emptyAfterDrain bool
+	receiveBatches [][]sqstypes.Message
+	deleteCalls    atomic.Int32
+	heartbeatCalls atomic.Int32
+	receiveCalls   atomic.Int32
 
 	deleteErr    error
 	heartbeatErr error

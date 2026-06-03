@@ -118,7 +118,12 @@ func main() {
 	log.Printf("  dynamodb table:  %s", c.dynamoTable)
 	log.Printf("  service metrics: %s", c.serviceMetricsURL)
 	log.Printf("  max archive:     %d bytes (UI hint only — service enforces)", c.maxArchiveBytes)
-	if err := http.ListenAndServe(c.listenAddr, mux); err != nil {
+	httpSrv := &http.Server{
+		Addr:              c.listenAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second, // G114: bound slow-header clients
+	}
+	if err := httpSrv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -333,7 +338,7 @@ func (s *server) handleResult(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, s.cfg.serviceMetricsURL, nil)
+	req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, s.cfg.serviceMetricsURL, http.NoBody)
 	resp, err := s.httpc.Do(req)
 	if err != nil {
 		http.Error(w, "service /metrics unreachable: "+err.Error(), http.StatusBadGateway)

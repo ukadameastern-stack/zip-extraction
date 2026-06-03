@@ -5,7 +5,8 @@
 // `go mod tidy` to keep tool versions pinned in tools/go.mod.
 //
 // Invoke pinned tools via:
-//   go run -modfile=tools/go.mod golang.org/x/vuln/cmd/govulncheck ./...
+//
+//	go run -modfile=tools/go.mod golang.org/x/vuln/cmd/govulncheck ./...
 //
 // SECURITY-10 / NFR-Z-047 — supply-chain pinning policy.
 package tools
