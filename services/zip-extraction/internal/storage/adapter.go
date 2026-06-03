@@ -67,6 +67,7 @@ func (a *Adapter) Download(ctx context.Context, bucket, key string) (io.ReadClos
 //   - handles non-seekable io.Reader bodies (our LimitedReader + bufio chain is non-seekable);
 //   - uses single PutObject for small bodies and switches to multipart above its own
 //     internal threshold (default 5 MiB, configurable via cfg.MultipartThresholdBytes).
+//
 // contentType is set on the resulting object; empty string defers to S3's default.
 func (a *Adapter) Upload(
 	ctx context.Context,

@@ -74,7 +74,7 @@ func (s *Service) Process(ctx context.Context, msg ClaimCheck) (Outcome, error) 
 	// 1. Download the source archive.
 	body, size, err := s.deps.Downloader.Download(extractCtx, msg.SourceBucket, msg.SourceKey)
 	if err != nil {
-		archiveStatus, archiveReason = s.classifyArchiveErr(err)
+		archiveReason = s.classifyArchiveErr(err) // archiveStatus already StatusFailed
 		s.deps.Metrics.ExtractionFailure(failureReason(archiveStatus, archiveReason))
 		return Outcome{Status: archiveStatus, Reason: archiveReason, DurationMs: ms(start, s.deps.Clock)}, nil
 	}
@@ -229,8 +229,8 @@ func (s *Service) processEntry(
 	}
 
 	// Per-entry bomb check (rules #5, #6, #9).
-	if err := s.deps.BombChecker.EntryCheck(idx, entry); err != nil {
-		if bde, ok := IsBombDefence(err); ok {
+	if bcErr := s.deps.BombChecker.EntryCheck(idx, entry); bcErr != nil {
+		if bde, ok := IsBombDefence(bcErr); ok {
 			logger.Warn("entry bomb-rejection",
 				zap.Int("rule", bde.Rule),
 				zap.String("reason", bde.Reason),
@@ -241,10 +241,10 @@ func (s *Service) processEntry(
 			s.recordFailedEntry(ctx, msg, out, idx) // BR-DDB-002: every entry produces exactly one row
 			return out, true, out.FailureReason, out.FailureDetail
 		}
-		out.FailureReason = err.Error()
-		out.FailureDetail = err.Error()
+		out.FailureReason = bcErr.Error()
+		out.FailureDetail = bcErr.Error()
 		s.recordFailedEntry(ctx, msg, out, idx)
-		return out, true, err.Error(), err.Error()
+		return out, true, bcErr.Error(), bcErr.Error()
 	}
 
 	// Open entry reader.
@@ -424,21 +424,23 @@ func (s *Service) recordFailedEntry(ctx context.Context, msg ClaimCheck, out Ent
 	}
 }
 
-// classifyArchiveErr categorises top-level download failures.
-func (s *Service) classifyArchiveErr(err error) (Status, string) {
+// classifyArchiveErr categorises top-level download failures into a
+// controlled-vocabulary reason. The archive status is always StatusFailed for
+// these paths, so the caller sets that directly.
+func (s *Service) classifyArchiveErr(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
-		return StatusFailed, "bomb-defence rule 10"
+		return "bomb-defence rule 10"
 	}
 	if errors.Is(err, context.Canceled) {
-		return StatusFailed, "drain canceled"
+		return "drain canceled"
 	}
 	if _, ok := IsPermanent(err); ok {
-		return StatusFailed, "permanent: source-download-failed"
+		return "permanent: source-download-failed"
 	}
 	if _, ok := IsTransient(err); ok {
-		return StatusFailed, "transient: source-download-failed"
+		return "transient: source-download-failed"
 	}
-	return StatusFailed, "source-download-failed: " + err.Error()
+	return "source-download-failed: " + err.Error()
 }
 
 // classifyEntryFailure converts an entry-processing error into a controlled-vocabulary reason.
@@ -459,8 +461,8 @@ func computeStatus(entries []EntryOutcome) Status {
 		return StatusSuccess // empty archive passing pre-check is a valid SUCCESS
 	}
 	var ok, fail int
-	for _, e := range entries {
-		if e.Status == EntryStatusUploaded {
+	for i := range entries {
+		if entries[i].Status == EntryStatusUploaded {
 			ok++
 		} else {
 			fail++

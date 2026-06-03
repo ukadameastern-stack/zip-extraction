@@ -73,7 +73,8 @@ func Build(
 		WrittenAt:           now,
 		Children:            make([]ChildEntry, 0, len(entries)),
 	}
-	for _, e := range entries {
+	for i := range entries {
+		e := &entries[i]
 		ss.Children = append(ss.Children, ChildEntry{
 			EntryIndex:     e.Index,
 			ChildKey:       e.ChildKey,

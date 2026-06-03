@@ -207,7 +207,7 @@ func TestLimitedReader_SmallSampleFloorSkipsRatio(t *testing.T) {
 	cfg.MaxCompressionRatio = 2 // very tight; would normally fire
 	c := bombdefence.New(cfg)
 
-	compressed := int64(100) // below 64 KiB floor
+	compressed := int64(100)                                  // below 64 KiB floor
 	body := bytes.NewReader(bytes.Repeat([]byte{'a'}, 10000)) // 100:1 ratio
 	lr := c.NewLimitedReader(body, compressed)
 	buf := make([]byte, 1024)

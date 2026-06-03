@@ -226,7 +226,7 @@ func (e httpErr) HTTPStatusCode() int { return e.status }
 // apiErr is a minimal smithy.APIError used to drive classifier tests.
 type apiErr struct{ code string }
 
-func (e apiErr) Error() string                { return e.code }
-func (e apiErr) ErrorCode() string            { return e.code }
-func (e apiErr) ErrorMessage() string         { return e.code }
+func (e apiErr) Error() string                 { return e.code }
+func (e apiErr) ErrorCode() string             { return e.code }
+func (e apiErr) ErrorMessage() string          { return e.code }
 func (e apiErr) ErrorFault() smithy.ErrorFault { return smithy.FaultServer }
