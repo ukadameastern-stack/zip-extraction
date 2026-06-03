@@ -56,3 +56,10 @@
 ### 🟡 OPERATIONS PHASE
 - [x] Operations (placeholder reached — workflow terminal; future expansion out of scope per CLAUDE.md)
 - [x] **DEV05 ephemeral environment** (post-workflow, developer-driven 2026-05-25) — full bootstrap + revert via `make deploy-dev05` / `make undeploy-dev05`; AWS resources DEV05-prefixed for safe teardown; live state tracked in `deploy/dev05/state.json`; per-run logs in `deploy/dev05/logs/`; design contract in `deploy/dev05-resources.md`. Includes IP-allowlisted public ALB Ingress for the developer test harness at `zip-extraction-dev-sandbox-v1.dev05.k8s.opus2dev.com`. Nine deployment-time bugs surfaced and fixed; full session diary appended to `audit.md`.
+
+## Post-Delivery Feature Evolution (tracked against code)
+The following were added/changed in code after the workflow reached the Operations placeholder. Design docs were reconciled to match on 2026-06-03 (see audit.md "Doc reconciliation to code").
+- **Bomb defence grew 10 → 12 rules**: rule #11 (`OverlapCheck`, Fifield non-recursive-bomb defence — `BR-BOMB-009`) and rule #12 (`PreCheck` total-declared-uncompressed-size cap, untrusted/50 GB default — `BR-BOMB-010`). Config gained `MaxTotalDeclaredUncompressedBytes` (8 bomb-defence thresholds total). Rule #1 default raised 500 MB → 5 GB (rule #2 = 2 GB remains the binding extracted-size ceiling).
+- **Classification hop**: optional `internal/classification` HTTP adapter wired in `main.go` (skipped when `CLASSIFICATION_URL` empty); best-effort per-entry classify, never fails the archive. Adds `classification` config section + Helm/values knobs.
+- **Metrics grew 8 → 10**: added `classification_calls_total{category}` and `classification_failures_total{reason}` (methods `ClassificationSuccess` / `ClassificationFailure`).
+- **Developer test harness**: `test/harness` UI (submit ZIP → SQS → poll DDB/slipsheet/metrics), deployed optionally via `harness-*` chart templates behind an IP-allowlisted ALB.

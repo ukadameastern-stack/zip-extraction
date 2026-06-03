@@ -39,7 +39,7 @@ Fifteen components — one per Go internal package plus `cmd/zip-extraction`. Th
 | 2 | `internal/app` | Top-level orchestrator coordinating the SQS consumer, HTTP server, and graceful shutdown |
 | 3 | `internal/sqs` | SQS long-poll receive-loop + bounded worker pool + per-message visibility heartbeat (FR-9) |
 | 4 | `internal/extraction` | Core domain orchestrator: download → bomb pre-check → per-entry loop → slipsheet → status. Defines all consumer-facing port interfaces and the typed-error hierarchy (Q4) |
-| 5 | `internal/bombdefence` | 10-rule defence + short-circuiting `LimitedReader` (Q5) for cumulative-size + ratio rules |
+| 5 | `internal/bombdefence` | 12-rule defence (incl. #11 overlap-check + #12 declared-total) + short-circuiting `LimitedReader` (Q5) for cumulative-size + ratio rules |
 | 6 | `internal/validation` | Entry path sanitisation (rules #7, #8) — pure, idempotent |
 | 7 | `internal/storage` | S3 adapter (streaming `GetObject`, multipart `PutObject` >5 MiB, hybrid MIME detection per Q6) |
 | 8 | `internal/dynamodb` | DynamoDB adapter — idempotent `PutItem` with `attribute_not_exists(pk)` (FR-5.3) |

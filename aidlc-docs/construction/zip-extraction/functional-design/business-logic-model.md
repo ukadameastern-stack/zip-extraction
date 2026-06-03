@@ -26,8 +26,10 @@ stateDiagram-v2
     Opening --> TerminalFailedUnsupported: encrypted/multi-disk/deflate64
     Opening --> TerminalFailedCorrupt: ZIP parse error
 
-    PreChecking --> Iterating: rules #1 + #4 OK
-    PreChecking --> TerminalFailedBombPre: rule #1 or #4 violated
+    PreChecking --> OverlapChecking: rules #1, #4, #12 OK
+    PreChecking --> TerminalFailedBombPre: rule #1, #4, or #12 violated
+    OverlapChecking --> Iterating: rule #11 OK (no overlapping data ranges)
+    OverlapChecking --> TerminalFailedBombPre: rule #11 violated (Fifield overlap)
 
     Iterating --> EntryStep: more entries
     Iterating --> SlipsheetWrite: end of entries
@@ -74,11 +76,12 @@ stateDiagram-v2
 
 ## 2. Bomb-Defence Enforcement Order
 
-Per FR-7 there are 10 bomb-defence rules. They are evaluated at **three distinct stages** of processing, summarised below. **The earliest applicable stage is chosen for each rule** — this minimises wasted work and ensures violations short-circuit as early as possible.
+Per FR-7 there are 12 bomb-defence rules (rules #11 and #12 were added as defence-in-depth — see `BR-BOMB-009` and `BR-BOMB-010` in `business-rules.md`). They are evaluated at **six distinct stages** of processing, summarised below. **The earliest applicable stage is chosen for each rule** — this minimises wasted work and ensures violations short-circuit as early as possible.
 
 | Stage | When | Rules | Inputs |
 |---|---|---|---|
-| **Pre-check** (PreChecking state) | Immediately after `archive/zip.NewReader` returns | #1 (compressed-archive-size), #4 (entry-count) | Archive metadata: total compressed bytes, entry count |
+| **Pre-check** (PreChecking state) | Immediately after `archive/zip.NewReader` returns | #1 (compressed-archive-size), #4 (entry-count), #12 (total-declared-uncompressed-size — untrusted, generous 50 GB cap) | Archive metadata: total compressed bytes, entry count, sum of declared `UncompressedSize64` |
+| **Overlap-check** (OverlapChecking state, `bombdefence.OverlapCheck`) | After PreCheck, before iterating entries | #11 (overlapping compressed-data ranges — Fifield non-recursive-bomb defence) | Per-entry `[DataOffset, DataOffset+CompressedSize64)` ranges from the central directory |
 | **Per-entry pre-stream** (EntryBombCheck state) | Before opening each entry's reader | #5 (directory-nesting-depth), #6 (symlink), #9 (single-file-max-decompressed-size from declared `UncompressedSize` header) | `EntryInfo`: name, mode, declared compressed/uncompressed sizes |
 | **Streaming** (EntryStream state) | Continuously while reading each entry | #2 (cumulative-extracted-size), #3 (compression-ratio) | Live byte counters maintained by `bombdefence.LimitedReader` |
 | **Path-validation** (EntryValidate state, delegated to `internal/validation`) | Before EntryBombCheck | #7 (absolute path), #8 (path traversal) | Raw `*zip.File.Name` string |
@@ -86,7 +89,8 @@ Per FR-7 there are 10 bomb-defence rules. They are evaluated at **three distinct
 
 ### Rationale for the order
 
-- Rule #1 and #4 are **constant-cost** checks against archive metadata — cheapest to evaluate. Run them first to reject huge archives or massively-fragmented ones before opening any entry.
+- Rules #1, #4, and #12 are **constant-cost** checks against archive metadata — cheapest to evaluate. Run them first to reject huge archives, massively-fragmented ones, or archives whose declared total uncompressed size is implausibly large before opening any entry. Rule #12 reads the **untrusted** declared `UncompressedSize64` sum, so its cap is set generously (50 GB default, ~25× the trusted streaming cap) and a value of 0 disables the rule; its purpose is to cheaply reject bombs that *truthfully* declare their explosive size, while lying bombs still fall through to the authoritative streaming cap (rule #2).
+- Rule #11 (overlap-check) runs after the metadata pre-checks but before any decompression: it sorts the entries' compressed-data byte ranges and verifies none overlap, defending against the Fifield non-recursive bomb (multiple central-directory records pointing at one shared deflate stream so it is decompressed many times). Rule #3 alone cannot catch this (no per-entry ratio anomaly); rule #2 catches only the cumulative symptom, not the mechanism.
 - Rule #9 uses the **declared** `UncompressedSize` from the ZIP local-file-header — this is **untrusted** input but it lets us reject obviously-oversized entries before allocating any stream. Rule #9 is also re-checked indirectly by the streaming limiter (rule #2 will fire as cumulative bytes accrue) — defence in depth.
 - Rules #7 and #8 (path safety) run **before** the entry's bomb checks because path validation is a precondition for using the entry name in any S3 key derivation downstream.
 - Rules #2 and #3 must run mid-stream (per Q5 of application design — short-circuiting `LimitedReader`); evaluating them post-hoc would defeat their purpose.

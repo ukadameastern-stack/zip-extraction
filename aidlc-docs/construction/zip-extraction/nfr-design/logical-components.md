@@ -94,8 +94,8 @@ Each entry: **Component (Go package symbol) — Lifecycle — Responsibilities �
 ### 1.9 Bomb-defence checker
 **Component**: `internal/bombdefence.Checker` (stateless with `Config`).
 **Lifecycle**: Constructed once; consumed by `extraction.Service.Process` for pre-check + per-entry checks + `NewLimitedReader` factory.
-**Responsibilities**: Apply all 10 bomb-defence rules (pre-check, per-entry, streaming, path-validation delegation).
-**Configurable inputs**: `cfg.BombDefence.*` (7 thresholds).
+**Responsibilities**: Apply all 12 bomb-defence rules (pre-check, overlap-check, per-entry, streaming, path-validation delegation).
+**Configurable inputs**: `cfg.BombDefence.*` (8 thresholds).
 **Concurrency notes**: Pre-check / per-entry are stateless; `LimitedReader` instances have per-stream state (cumulative counters) and are NOT shared across goroutines.
 **NFR-Z source**: NFR-Z-014, NFR-Z-043
 **Design pattern**: §3.2 short-circuiting LimitedReader.

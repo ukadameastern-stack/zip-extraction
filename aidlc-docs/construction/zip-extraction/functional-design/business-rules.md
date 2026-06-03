@@ -13,7 +13,7 @@ This document enumerates the business rules that govern every algorithmic decisi
 
 | Prefix | Category |
 |---|---|
-| BR-BOMB | Bomb-defence (FR-7 rules #1 – #10) |
+| BR-BOMB | Bomb-defence (FR-7 rules #1 – #12) |
 | BR-PATH | Path validation & sanitisation (FR-6 + FR-7 rules #7/#8) |
 | BR-MIME | MIME-type detection & labelling |
 | BR-RETRY | Retry classification & backoff (FR-12, Q5 of functional design) |

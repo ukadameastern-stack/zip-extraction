@@ -286,9 +286,9 @@ The Helm chart renders the IRSA policy with `kms:Decrypt` + `kms:GenerateDataKey
 ## 5. Observability Patterns
 
 ### 5.1 Prometheus collector taxonomy
-**Summary**: Six business metrics from FR-13.2 plus two operational counters (`redelivery_skips_total`, `slipsheet_write_failures_total`), all registered on `prometheus.DefaultRegisterer` at startup and served via `promhttp.Handler()` on `/metrics`.
+**Summary**: Ten collectors — six business metrics from FR-13.2, two operational counters (`redelivery_skips_total`, `slipsheet_write_failures_total`), and two classification-hop counters (`classification_calls_total{category}`, `classification_failures_total{reason}`) — all registered on `prometheus.DefaultRegisterer` at startup and served via `promhttp.Handler()` on `/metrics`.
 **NFR-Z source**: NFR-Z-060
-**Implementation locus**: `internal/metrics.New(reg) → *Metrics` with typed methods (`EntryProcessed`, `ExtractionDuration`, `ExtractionFailure`, `BombRejection`, `BytesExtracted`, `PartialFailure`, `RedeliverySkip`, `SlipsheetWriteFailure`).
+**Implementation locus**: `internal/metrics.New(reg) → *Metrics` with typed methods (`EntryProcessed`, `ExtractionDuration`, `ExtractionFailure`, `BombRejection`, `BytesExtracted`, `PartialFailure`, `RedeliverySkip`, `SlipsheetWriteFailure`, `ClassificationSuccess`, `ClassificationFailure`).
 **Configurable parameters**: histogram buckets for `zip_extraction_duration_seconds`: `[1, 5, 15, 30, 60, 120, 180, 220, 240]` seconds.
 **Anti-patterns avoided**:
 - ❌ Free-form metric names looked up by string — typos hidden until production.

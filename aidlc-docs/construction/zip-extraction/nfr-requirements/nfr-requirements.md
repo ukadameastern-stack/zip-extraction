@@ -195,7 +195,7 @@ resources:
 **Verification**: CI workflow inspection during Build & Test
 
 ### NFR-Z-048 — Secure design (separation of concerns)
-**Statement**: Security-critical logic is isolated in dedicated packages: `internal/bombdefence` (10-rule defence + LimitedReader) and `internal/validation` (path safety). They are leaf packages depending only on `internal/extraction` typed-error types and stdlib (per `component-dependency.md`).
+**Statement**: Security-critical logic is isolated in dedicated packages: `internal/bombdefence` (12-rule defence + LimitedReader) and `internal/validation` (path safety). They are leaf packages depending only on `internal/extraction` typed-error types and stdlib (per `component-dependency.md`).
 **Source**: SECURITY-11
 **Verification**: Import-graph lint rule (`internal/bombdefence` MUST NOT import AWS SDK or `internal/sqs|storage|dynamodb`)
 
