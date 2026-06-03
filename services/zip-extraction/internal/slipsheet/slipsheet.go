@@ -70,8 +70,11 @@ func Build(
 		Status:              status.String(),
 		FailureReason:       archiveReason,
 		FailureDetail:       archiveDetail,
-		WrittenAt:           now,
-		Children:            make([]ChildEntry, 0, len(entries)),
+		// Canonical UTC: keeps the JSON timestamp stable and makes the
+		// marshal→unmarshal round-trip location-independent (a "Z" timestamp
+		// always parses back to time.UTC, regardless of the host timezone).
+		WrittenAt: now.UTC(),
+		Children:  make([]ChildEntry, 0, len(entries)),
 	}
 	for i := range entries {
 		e := &entries[i]
