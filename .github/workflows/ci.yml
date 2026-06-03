@@ -18,7 +18,6 @@ on:
 permissions:
   contents: read
   pull-requests: read
-  statuses: write   # TEMP(debug): surface the failing test via a commit status
 
 jobs:
   build-test-vuln:
@@ -54,40 +53,12 @@ jobs:
 
       - name: test (incl. PBT)
         env:
-          # Fixed seed = deterministic, reproducible PBT runs. Previously this was
-          # ${{ github.run_id }}, but pgregory.net/rapid only began honouring
-          # RAPID_SEED in v1.3.0 (the repo was pinned to v1.1.0), so the variable
-          # was silently ignored and every run used a fresh random seed. With
-          # rapid >= v1.3.0 this pins the inputs; replay locally with
-          # `make pbt-replay SEED=20240601`.
+          # Fixed seed = deterministic, reproducible PBT runs. pgregory.net/rapid
+          # only began honouring RAPID_SEED in v1.3.0 (the repo was pinned to
+          # v1.1.0, so this variable was silently ignored and every run used a
+          # fresh random seed). Replay locally with `make pbt-replay SEED=20240601`.
           RAPID_SEED: "20240601"
-        # No -race here: the race detector slows execution ~10x, which makes the
-        # timing-sensitive concurrency tests (SQS heartbeat/drain, graceful
-        # shutdown) flaky on shared CI runners. This matches the sibling
-        # office-conversion-service-demo gate. Race detection still runs locally
-        # via `make test` (and can be added as a dedicated non-blocking job later).
-        run: |
-          set -o pipefail
-          go test -v -coverpkg=./internal/... -coverprofile=cover.out ./... 2>&1 | tee /tmp/test.log
-
-      # TEMP(debug): the job log isn't readable without auth, so when the test
-      # step fails we surface the failing lines two ways — the full tail into the
-      # job summary (for humans), and the key lines as ::error:: annotations
-      # (readable via the public check-runs annotations API). Remove once green.
-      - name: surface test failure (debug)
-        if: failure()
-        run: |
-          {
-            echo '## test failure (debug capture)';
-            echo '```';
-            grep -nE '^--- FAIL|^=== RUN|^    .*\.go:[0-9]+:|panic:|FAIL\b|undefined:|cannot use|^# ' /tmp/test.log | tail -n 250 || true;
-            echo '```';
-          } >> "$GITHUB_STEP_SUMMARY" || true
-          grep -nE '^--- FAIL|panic:|undefined:|cannot use|^# [^ ]|\.go:[0-9]+:|Error Trace|Error:|Test:' /tmp/test.log | head -10 | while IFS= read -r line; do
-            clean=$(printf '%s' "$line" | tr '\n' ' ' | sed 's/%/%25/g; s/\r/ /g')
-            echo "::error::DBG ${clean}"
-          done
-          echo "::error::DBG tail $(tail -n 1 /tmp/test.log | cut -c1-180)"
+        run: go test -race -coverpkg=./internal/... -coverprofile=cover.out ./...
 
       - name: coverage gate (>=80%)
         run: |
