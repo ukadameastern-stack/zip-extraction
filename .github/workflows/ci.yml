@@ -72,12 +72,10 @@ jobs:
 
       # TEMP(debug): the job log isn't readable without auth, so when the test
       # step fails we surface the failing lines two ways — the full tail into the
-      # job summary (for humans), and a compact first-failure line into a commit
-      # status (readable via the public API). Remove this step once CI is green.
+      # job summary (for humans), and the key lines as ::error:: annotations
+      # (readable via the public check-runs annotations API). Remove once green.
       - name: surface test failure (debug)
         if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           {
             echo '## test failure (debug capture)';
@@ -85,13 +83,11 @@ jobs:
             grep -nE '^--- FAIL|^=== RUN|^    .*\.go:[0-9]+:|panic:|FAIL\b|undefined:|cannot use|^# ' /tmp/test.log | tail -n 250 || true;
             echo '```';
           } >> "$GITHUB_STEP_SUMMARY" || true
-          DESC=$(grep -nE '^--- FAIL|panic:|undefined:|cannot use|^# [^ ]|\.go:[0-9]+:' /tmp/test.log | head -3 | tr '\n' ' ')
-          DESC=$(printf '%s' "$DESC" | cut -c1-130)
-          [ -z "$DESC" ] && DESC="$(tail -n 1 /tmp/test.log | cut -c1-130)"
-          BODY=$(python3 -c "import json,sys;print(json.dumps({'state':'failure','context':'debug/first-fail','description':sys.argv[1] or 'no-line'}))" "$DESC")
-          curl -s -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" -d "$BODY" >/dev/null
-          echo "posted commit status: $DESC"
+          grep -nE '^--- FAIL|panic:|undefined:|cannot use|^# [^ ]|\.go:[0-9]+:|Error Trace|Error:|Test:' /tmp/test.log | head -10 | while IFS= read -r line; do
+            clean=$(printf '%s' "$line" | tr '\n' ' ' | sed 's/%/%25/g; s/\r/ /g')
+            echo "::error::DBG ${clean}"
+          done
+          echo "::error::DBG tail $(tail -n 1 /tmp/test.log | cut -c1-180)"
 
       - name: coverage gate (>=80%)
         run: |
