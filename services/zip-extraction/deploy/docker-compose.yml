@@ -8,6 +8,11 @@
 #             `make bootstrap` step needed; from this dir, `cd deploy &&
 #             docker compose up -d` also works)
 # Tear down: docker compose -f deploy/docker-compose.yml down  (add -v to wipe state)
+#
+# Endpoints (host):
+#   harness UI      http://localhost:9009
+#   service /healthz http://localhost:8085/healthz/ready
+#   LocalStack      http://localhost:4568/_localstack/health
 
 services:
   localstack:
@@ -107,3 +112,34 @@ services:
       - ./config-local.yaml:/etc/zip-extraction/config.yaml:ro
     # Drain window matches the application's gracefulShutdownTimeoutSec + 20s margin (NFR-Z-022).
     stop_grace_period: 270s
+
+  # ── Test harness UI ─────────────────────────────────────────────────────────
+  # The zip-extraction inspection/injection dashboard (Go + embedded index.html).
+  # Brought up by `docker compose up` for parity with office's test-ui and
+  # classification's ui. In-container it reaches LocalStack + the service over the
+  # compose network DNS (localstack:4566 / zip-extraction:8080), NOT the host
+  # ports. Open:  http://localhost:9000
+  # (`make harness` still runs it on the host via `go run` if you prefer that.)
+  harness:
+    container_name: zip-extraction-harness
+    image: zip-extraction-harness:dev
+    build:
+      context: ..
+      dockerfile: test/harness/Dockerfile
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      zip-extraction:
+        condition: service_started
+    command:
+      - "-listen=:9000"
+      - "-endpoint-url=http://localstack:4566"
+      - "-queue-url=http://localstack:4566/000000000000/zip-extraction-queue"
+      - "-dlq-url=http://localstack:4566/000000000000/zip-extraction-dlq"
+      - "-service-metrics-url=http://zip-extraction:8080/metrics"
+    ports:
+      # Host 9009 (container stays 9000) to keep the zip stack in its own lane —
+      # classification's local Lambda RIE already uses host :9000, so publishing
+      # the harness there clashes when both stacks run. Open: http://localhost:9009
+      - "127.0.0.1:9009:9000"
+    restart: unless-stopped
