@@ -3,8 +3,11 @@
 # is built from the local Dockerfile and runs against LocalStack via
 # AWS_ENDPOINT_URL.
 #
-# Bring up:  make up && make bootstrap
-# Tear down: make down
+# Bring up:  docker compose -f deploy/docker-compose.yml up -d
+#            (the `bootstrap` service auto-seeds LocalStack — no separate
+#             `make bootstrap` step needed; from this dir, `cd deploy &&
+#             docker compose up -d` also works)
+# Tear down: docker compose -f deploy/docker-compose.yml down  (add -v to wipe state)
 
 services:
   localstack:
@@ -30,6 +33,34 @@ services:
       retries: 12
     stop_grace_period: 5s
 
+  # Auto-seed LocalStack with the SQS queue+DLQ, S3 buckets, and DynamoDB table
+  # the service expects (runs deploy/bootstrap-localstack.sh inside an aws-cli
+  # container against the in-network LocalStack). Runs once and exits; the
+  # service waits for it to complete. This is what makes a plain
+  # `docker compose up -d` a single working command (no `make bootstrap`).
+  bootstrap:
+    container_name: zip-extraction-bootstrap
+    image: amazon/aws-cli:2.17.0
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: eu-west-1
+      # In-network endpoint (not the host-published 4568) — the script defaults
+      # to the host port, so override it for the container network.
+      AWS_ENDPOINT_URL: http://localstack:4566
+      STAGING_BUCKET: doc-uploader-staging-local
+      SOURCE_BUCKET: doc-uploader-uploads-local
+      QUEUE_NAME: zip-extraction-queue
+      DLQ_NAME: zip-extraction-dlq
+      DYNAMO_TABLE: pipeline_files
+    entrypoint: ["/bin/sh", "/bootstrap.sh"]
+    volumes:
+      - ./bootstrap-localstack.sh:/bootstrap.sh:ro
+    restart: "no"
+
   zip-extraction:
     container_name: zip-extraction-service
     # Pin an explicit, repo-owned image name so a local build produces a stable,
@@ -43,6 +74,8 @@ services:
     depends_on:
       localstack:
         condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully
     environment:
       AWS_REGION: eu-west-1
       AWS_ENDPOINT_URL: http://localstack:4566
