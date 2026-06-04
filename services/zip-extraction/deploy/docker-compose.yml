@@ -13,7 +13,12 @@ services:
     # TODO(security): pin by digest for production-parity per SECURITY-10:
     # image: localstack/localstack@sha256:<digest>
     ports:
-      - "4566:4566"
+      # Host port 4568 (not the LocalStack default 4566) so this stack can run
+      # alongside the sibling demos on one machine without a clash:
+      #   classification → 4566, office-convert → 4567, zip-extraction → 4568.
+      # The container still serves 4566; only the host publish moves. Host-side
+      # tooling (make bootstrap/run, the test harness) targets localhost:4568.
+      - "127.0.0.1:4568:4566"
     environment:
       SERVICES: sqs,s3,dynamodb,sts
       DEBUG: "0"
@@ -61,7 +66,10 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8080:8080"
+      # Host port 8085 (not 8080) so it doesn't clash with office-convert's
+      # 8080 when both demo stacks run on one machine. The container still
+      # listens on 8080 (HTTP_PORT below); only the host publish moves.
+      - "127.0.0.1:8085:8080"
     volumes:
       - ./config-local.yaml:/etc/zip-extraction/config.yaml:ro
     # Drain window matches the application's gracefulShutdownTimeoutSec + 20s margin (NFR-Z-022).

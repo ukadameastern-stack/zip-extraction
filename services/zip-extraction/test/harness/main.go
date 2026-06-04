@@ -55,14 +55,14 @@ type config struct {
 func main() {
 	var c config
 	flag.StringVar(&c.listenAddr, "listen", ":9000", "address for the harness HTTP server")
-	flag.StringVar(&c.endpointURL, "endpoint-url", "http://localhost:4566", "AWS SDK endpoint override (LocalStack)")
+	flag.StringVar(&c.endpointURL, "endpoint-url", "http://localhost:4568", "AWS SDK endpoint override (LocalStack; host port per deploy/docker-compose.yml)")
 	flag.StringVar(&c.region, "region", "eu-west-1", "AWS region")
-	flag.StringVar(&c.queueURL, "queue-url", "http://localhost:4566/000000000000/zip-extraction-queue", "SQS main queue URL")
-	flag.StringVar(&c.dlqURL, "dlq-url", "http://localhost:4566/000000000000/zip-extraction-dlq", "SQS dead-letter queue URL")
+	flag.StringVar(&c.queueURL, "queue-url", "http://localhost:4568/000000000000/zip-extraction-queue", "SQS main queue URL")
+	flag.StringVar(&c.dlqURL, "dlq-url", "http://localhost:4568/000000000000/zip-extraction-dlq", "SQS dead-letter queue URL")
 	flag.StringVar(&c.sourceBucket, "source-bucket", "doc-uploader-uploads-local", "S3 source bucket where ZIPs are uploaded")
 	flag.StringVar(&c.stagingBucket, "staging-bucket", "doc-uploader-staging-local", "S3 staging bucket")
 	flag.StringVar(&c.dynamoTable, "dynamo-table", "pipeline_files", "DynamoDB table")
-	flag.StringVar(&c.serviceMetricsURL, "service-metrics-url", "http://localhost:8080/metrics", "zip-extraction service /metrics endpoint")
+	flag.StringVar(&c.serviceMetricsURL, "service-metrics-url", "http://localhost:8085/metrics", "zip-extraction service /metrics endpoint (host port per deploy/docker-compose.yml)")
 	flag.Int64Var(&c.maxArchiveBytes, "max-archive-bytes", 5368709120, "max source ZIP size accepted by the service in this environment (mirrors bombDefence.maxCompressedSizeBytes; default 5 GiB matches chart/values.yaml). Surfaced in the Submit form as a hint; the service enforces the actual limit.")
 	flag.Parse()
 

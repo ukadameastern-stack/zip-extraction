@@ -65,21 +65,21 @@ down:
 	$(COMPOSE) -f deploy/docker-compose.yml down -v
 
 bootstrap:
-	AWS_ENDPOINT_URL=http://localhost:4566 AWS_REGION=eu-west-1 \
+	AWS_ENDPOINT_URL=http://localhost:4568 AWS_REGION=eu-west-1 \
 		AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test \
 		bash deploy/bootstrap-localstack.sh
 
 run:
-	AWS_ENDPOINT_URL=http://localhost:4566 \
+	AWS_ENDPOINT_URL=http://localhost:4568 \
 	AWS_REGION=eu-west-1 \
 	AWS_ACCESS_KEY_ID=test \
 	AWS_SECRET_ACCESS_KEY=test \
 	LOG_FORMAT=console \
 	LOG_LEVEL=debug \
-	QUEUE_URL=http://localhost:4566/000000000000/zip-extraction-queue \
+	QUEUE_URL=http://localhost:4568/000000000000/zip-extraction-queue \
 	STAGING_BUCKET=doc-uploader-staging-local \
 	DYNAMO_TABLE=pipeline_files \
-	HTTP_PORT=8080 \
+	HTTP_PORT=8085 \
 	SSE_MODE=SSE-S3 \
 	CONFIG_PATH=deploy/config-local.yaml \
 	$(GO) run ./cmd/zip-extraction
@@ -101,7 +101,7 @@ pbt-replay:
 	RAPID_SEED=$$SEED $(GO) test -run TestProperty ./...
 
 harness:
-	@echo "Starting test harness on http://localhost:9000 (LocalStack on :4566; service on :8080)"
+	@echo "Starting test harness on http://localhost:9000 (LocalStack on :4568; service on :8085)"
 	$(GO) run ./test/harness
 
 clean:

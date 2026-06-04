@@ -23,8 +23,8 @@ make run
 Send a test message:
 
 ```bash
-aws --endpoint-url=http://localhost:4566 sqs send-message \
-    --queue-url http://localhost:4566/000000000000/zip-extraction-queue \
+aws --endpoint-url=http://localhost:4568 sqs send-message \
+    --queue-url http://localhost:4568/000000000000/zip-extraction-queue \
     --message-body '{
         "pipelineExecutionId": "exec-test-1",
         "tenantId": "tenant-1",
