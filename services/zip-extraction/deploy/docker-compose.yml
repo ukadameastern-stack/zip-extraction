@@ -27,6 +27,11 @@ services:
 
   zip-extraction:
     container_name: zip-extraction-service
+    # Pin an explicit, repo-owned image name so a local build produces a stable,
+    # namespaced tag (not the compose default `deploy_zip-extraction`) and never
+    # collides with sibling repos' images. Sibling stacks (e.g. the
+    # classification pipeline) consume this via an explicit retag, not by name.
+    image: zip-extraction-service:dev
     build:
       context: ..
       dockerfile: Dockerfile
