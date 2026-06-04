@@ -15,8 +15,8 @@ Lives at `services/zip-extraction/test/harness/` — **not part of the productio
 
 ## Prerequisites
 
-- LocalStack running on `:4566` (e.g. `make up && make bootstrap` from the service dir).
-- The zip-extraction service running on `:8080` (or pass `-service-metrics-url`).
+- LocalStack running on `:4568` (e.g. `make up && make bootstrap` from the service dir; the compose stack publishes LocalStack on host 4568 to avoid clashing with the sibling demos).
+- The zip-extraction service running on `:8085` (or pass `-service-metrics-url`).
 - All AWS resources provisioned (source bucket, staging bucket, queue + DLQ, DDB table).
 
 ## Run
@@ -34,14 +34,14 @@ Then open <http://localhost:9000/>.
 
 ```
 -listen              :9000                                              harness HTTP port
--endpoint-url        http://localhost:4566                              LocalStack endpoint; EMPTY (-endpoint-url=) means default real-AWS endpoints
+-endpoint-url        http://localhost:4568                              LocalStack endpoint (host port per deploy/docker-compose.yml); EMPTY (-endpoint-url=) means default real-AWS endpoints
 -region              eu-west-1                                          AWS region
--queue-url           http://localhost:4566/000000000000/zip-extraction-queue
--dlq-url             http://localhost:4566/000000000000/zip-extraction-dlq   surfaced in the queue-depth panel
+-queue-url           http://localhost:4568/000000000000/zip-extraction-queue
+-dlq-url             http://localhost:4568/000000000000/zip-extraction-dlq   surfaced in the queue-depth panel
 -source-bucket       doc-uploader-uploads-local                         where ZIPs are uploaded
 -staging-bucket      doc-uploader-staging-local                         where children + slipsheets land
 -dynamo-table        pipeline_files
--service-metrics-url http://localhost:8080/metrics                      proxied for the metrics panel
+-service-metrics-url http://localhost:8085/metrics                      proxied for the metrics panel
 ```
 
 **Credential mode** is decided by `-endpoint-url`:

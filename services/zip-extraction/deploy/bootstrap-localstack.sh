@@ -2,13 +2,15 @@
 # Provision LocalStack with the AWS resources the service expects (FR-15.3).
 # Idempotent — re-running is a no-op.
 #
-# Usage: AWS_ENDPOINT_URL=http://localhost:4566 AWS_REGION=eu-west-1 \
+# Usage: AWS_ENDPOINT_URL=http://localhost:4568 AWS_REGION=eu-west-1 \
 #        AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test \
 #        bash deploy/bootstrap-localstack.sh
+# (Host port 4568 = where deploy/docker-compose.yml publishes LocalStack, so it
+#  doesn't clash with the sibling demos on 4566/4567.)
 
 set -euo pipefail
 
-: "${AWS_ENDPOINT_URL:=http://localhost:4566}"
+: "${AWS_ENDPOINT_URL:=http://localhost:4568}"
 : "${AWS_REGION:=eu-west-1}"
 
 BUCKET="${STAGING_BUCKET:-doc-uploader-staging-local}"
